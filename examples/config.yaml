@@ -1,0 +1,83 @@
+# KeySwift Configuration File
+
+# Application Groups define categories of applications
+appGroups:
+  terminal:
+    name: Terminal Emulators
+    description: Command line terminal applications
+    appPatterns:
+      - "gnome-terminal-server"
+      - "konsole"
+      - "alacritty"
+      - "kitty"
+      - "com.mitchellh.ghostty"
+
+  jetbrains:
+    name: JetBrains IDEs
+    description: JetBrains integrated development environments
+    appPatterns:
+      - "jetbrains-idea"
+      - "jetbrains-clion"
+      - "jetbrains-pycharm"
+      - "jetbrains-webstorm"
+      - "jetbrains-goland"
+
+  browsers:
+    name: Web Browsers
+    description: Web browser applications
+    appPatterns:
+      - "*firefox*"
+      - "*chrome*"
+      - "*chromium*"
+      - "brave"
+
+# Keymap Groups define sets of keymappings that apply to specific app groups
+keymapGroups:
+  vim_navigation:
+    name: Vim-style Navigation
+    description: Vim-like navigation keys (hjkl)
+    enabled: true
+    appGroups:
+      - terminal
+      - jetbrains
+    keymaps:
+      - key: "Alt+h"
+        command: "Left"
+        description: "Move cursor left"
+        enabled: true
+
+      - key: "Alt+j"
+        command: "Down"
+        description: "Move cursor down"
+        enabled: true
+
+      - key: "Alt+k"
+        command: "Up"
+        description: "Move cursor up"
+        enabled: true
+
+      - key: "Alt+l"
+        command: "Right"
+        description: "Move cursor right"
+        enabled: true
+
+  media_controls:
+    name: Media Control Shortcuts
+    description: Global media playback controls
+    enabled: true
+    appGroups: [ ] # Empty means global (all applications)
+    keymaps:
+      - key: "Super+p"
+        command: "XF86AudioPlay"
+        description: "Play/Pause media"
+        enabled: true
+
+      - key: "Super+["
+        command: "XF86AudioPrev"
+        description: "Previous track"
+        enabled: true
+
+      - key: "Super+]"
+        command: "XF86AudioNext"
+        description: "Next track"
+        enabled: true
