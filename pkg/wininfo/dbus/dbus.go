@@ -109,11 +109,10 @@ func WithActiveWindowChangeCallback(callback wininfo.ActiveWindowChangeCallback)
 	}
 }
 
-func New(opt... Option) (*Receiver, error) {
+func New(opt ...Option) (*Receiver, error) {
 	r := &Receiver{
 		options: &options{},
 	}
-
 
 	for _, o := range opt {
 		o(r.options)

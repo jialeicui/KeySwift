@@ -1,5 +1,7 @@
 package keys
 
+import "github.com/jialeicui/golibevdev"
+
 type FunctionKeys interface {
 	Copy()
 	Cut()
@@ -15,4 +17,5 @@ type FunctionKeys interface {
 	SaveAs()
 	Print()
 	Quit()
+	SendKeys(keys []golibevdev.KeyEventCode) error
 }

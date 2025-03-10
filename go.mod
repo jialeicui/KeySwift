@@ -1,18 +1,17 @@
 module github.com/jialeicui/keyswift
 
-go 1.23.0
-
-toolchain go1.23.4
+go 1.22
 
 require (
+	github.com/expr-lang/expr v1.16.9
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/samber/lo v1.49.1 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	github.com/samber/lo v1.49.1
+	golang.org/x/text v0.21.0 // indirect
 )
 
 require (

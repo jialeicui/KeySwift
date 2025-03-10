@@ -1,22 +1,58 @@
 package conf
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
 
-// Config represents the root configuration for KeySwift
+	"gopkg.in/yaml.v3"
+)
+
+// Config represents the main configuration structure for keyswift
 type Config struct {
-	AppGroups    map[string]AppGroup    `yaml:"appGroups"`
-	KeymapGroups map[string]KeymapGroup `yaml:"keymapGroups"`
+	ModeActions map[string]ModeAction `yaml:"mode_actions"`
 }
 
-// Validate ensures the configuration is valid
-func (c *Config) Validate() error {
-	// Validate app groups references in keymap groups
-	for name, kmGroup := range c.KeymapGroups {
-		for _, appGroupName := range kmGroup.AppGroups {
-			if _, exists := c.AppGroups[appGroupName]; !exists {
-				return fmt.Errorf("keymap group '%s' references non-existent app group '%s'", name, appGroupName)
-			}
-		}
+// ModeAction is an array of trigger bindings
+type ModeAction struct {
+	If       string            `yaml:"if"`
+	Triggers []*TriggerBinding `yaml:"triggers"`
+}
+
+// TriggerBinding connects a source event with an action
+type TriggerBinding struct {
+	SourceEvent *SourceEvent `yaml:"source_event"`
+	Action      *Action      `yaml:"action"`
+}
+
+// Load loads the configuration from the specified path
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
-	return nil
+
+	config := &Config{}
+	if err := yaml.Unmarshal(data, config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	return config, nil
+}
+
+// DefaultConfigPath returns the default configuration path
+func DefaultConfigPath() string {
+	configDir := os.Getenv("XDG_CONFIG_HOME")
+	if configDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		configDir = filepath.Join(homeDir, ".config")
+	}
+	return filepath.Join(configDir, "keyswift", "config.yaml")
 }

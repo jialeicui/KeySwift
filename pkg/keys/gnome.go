@@ -99,3 +99,16 @@ func (g *GnomeKeys) Print() {
 func (g *GnomeKeys) Quit() {
 	g.pressWithCtrl(golibevdev.KeyQ)
 }
+
+func (g *GnomeKeys) SendKeys(keys []golibevdev.KeyEventCode) error {
+	for _, key := range keys {
+		// Press target key
+		g.out.WriteEvent(golibevdev.EvKey, key, 1)
+		// Release target key
+		g.out.WriteEvent(golibevdev.EvKey, key, 0)
+	}
+
+	g.out.Sync()
+
+	return nil
+}
