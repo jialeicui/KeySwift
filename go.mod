@@ -9,6 +9,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/buke/quickjs-go v0.4.15 // indirect
+
 require (
 	github.com/samber/lo v1.49.1
 	golang.org/x/text v0.21.0 // indirect

@@ -1,7 +1,6 @@
 package mode
 
 import (
-	"github.com/jialeicui/keyswift/pkg/conf"
 	"github.com/jialeicui/keyswift/pkg/wininfo"
 )
 
@@ -11,7 +10,6 @@ type Mode interface {
 	Name() string
 	// ProcessEvent processes an event and returns actions to execute
 	// Returns nil if no action should be taken
-	ProcessEvent(event *Event) []*conf.Action
 }
 
 // Event represents any type of event that can trigger an action
@@ -26,7 +24,7 @@ type Event struct {
 
 // KeyPressEvent represents a keyboard key press
 type KeyPressEvent struct {
-	Key      string
+	Keys     []string
 	Pressed  bool // true for press, false for release
 	Repeated bool // true if key repeat
 }
