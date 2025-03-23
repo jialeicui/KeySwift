@@ -2,12 +2,10 @@ github.com/buke/quickjs-go v0.4.15 h1:VYs3OUaqoLzGXkXMqjh+MU2NVku883AlnMGwBr7sqp
 github.com/buke/quickjs-go v0.4.15/go.mod h1:DTNBNlQc+GflC2iemHKotAjdR5cKsfmkF75UuhA4iLs=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/expr-lang/expr v1.16.9 h1:WUAzmR0JNI9JCiF0/ewwHB1gmcGw5wW7nWt8gc6PpCI=
-github.com/expr-lang/expr v1.16.9/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=
 github.com/godbus/dbus/v5 v5.1.0 h1:4KLkAxT3aOY8Li4FRJe/KvhoNFFxo0m6fNuFUO8QJUk=
 github.com/godbus/dbus/v5 v5.1.0/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
-github.com/jialeicui/golibevdev v0.0.1 h1:iwR1+KnJ97fCeWz5Ili4tVLJ21LtZVNFy0uMS7yetFU=
-github.com/jialeicui/golibevdev v0.0.1/go.mod h1:BIGi9TtzkWS9wHy3n+uGXeSfhiPWJUOVCvgg/Qh8tX8=
+github.com/jialeicui/golibevdev v0.0.2 h1:CQij28fpHE0Cd4tMH4udkiFWloxwSA2Z+Z67Gj146iY=
+github.com/jialeicui/golibevdev v0.0.2/go.mod h1:BIGi9TtzkWS9wHy3n+uGXeSfhiPWJUOVCvgg/Qh8tX8=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e h1:fD57ERR4JtEqsWbfPhv4DMiApHyliiK5xCTNVSPiaAs=

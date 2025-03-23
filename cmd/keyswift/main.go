@@ -12,19 +12,18 @@ import (
 	"github.com/jialeicui/golibevdev"
 	"github.com/samber/lo"
 
-	"github.com/jialeicui/keyswift/pkg/conf"
-	"github.com/jialeicui/keyswift/pkg/dev"
+	"github.com/jialeicui/keyswift/pkg/bus"
 	"github.com/jialeicui/keyswift/pkg/evdev"
-	"github.com/jialeicui/keyswift/pkg/keys"
-	"github.com/jialeicui/keyswift/pkg/mode"
+	"github.com/jialeicui/keyswift/pkg/handler"
+	"github.com/jialeicui/keyswift/pkg/utils"
 	"github.com/jialeicui/keyswift/pkg/wininfo/dbus"
 )
 
 var (
-	flagKeyboards = flag.String("keyboards", "Apple", "Comma-separated list of keyboard device name substrings")
-	flagConfig    = flag.String("config", "", "Configuration file path (defaults to $XDG_CONFIG_HOME/keyswift/config.js)")
-	// TODO change this to false
-	flagVerbose = flag.Bool("verbose", true, "Enable verbose logging")
+	flagKeyboards        = flag.String("keyboards", "HHKB", "Comma-separated list of keyboard device name substrings")
+	flagConfig           = flag.String("config", "", "Configuration file path (defaults to $XDG_CONFIG_HOME/keyswift/config.js)")
+	flagVerbose          = flag.Bool("verbose", false, "Enable verbose logging")
+	flagOutputDeviceName = flag.String("output-device-name", "keyswift", "Name of the virtual keyboard device")
 )
 
 func main() {
@@ -40,7 +39,7 @@ func main() {
 	// Load configuration
 	configPath := *flagConfig
 	if configPath == "" {
-		configPath = conf.DefaultConfigPath()
+		configPath = utils.DefaultConfigPath()
 	}
 
 	// Initialize window info service
@@ -53,13 +52,12 @@ func main() {
 	slog.Info("Window Monitor service is running...")
 
 	// Initialize virtual keyboard for output
-	out, err := golibevdev.NewVirtualKeyboard("keyswift")
+	out, err := golibevdev.NewVirtualKeyboard(*flagOutputDeviceName)
 	if err != nil {
 		slog.Error("Failed to create virtual keyboard", "error", err)
 		os.Exit(1)
 	}
 	defer out.Close()
-	gnomeKeys := keys.NewGnomeKeys(out)
 
 	script, err := os.ReadFile(configPath)
 	if err != nil {
@@ -67,13 +65,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize mode manager
-	modeManager, err := mode.NewManager(string(script), gnomeKeys, windowMonitor)
+	// Initialize bus manager
+	busMgr, err := bus.New(string(script), windowMonitor, out)
 	if err != nil {
-		slog.Error("Failed to initialize mode manager", "error", err)
+		slog.Error("Failed to initialize bus manager", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("Mode manager initialized")
+	slog.Info("bus manager initialized")
 
 	// Find input devices
 	devs, err := evdev.NewOverviewImpl().ListInputDevices()
@@ -93,7 +91,7 @@ func main() {
 		}
 
 		matches := lo.Filter(devs, func(item *evdev.InputDevice, _ int) bool {
-			return strings.Contains(item.Name, pattern)
+			return strings.Contains(item.Name, pattern) && item.Name != *flagOutputDeviceName
 		})
 
 		matchedDevices = append(matchedDevices, matches...)
@@ -114,7 +112,7 @@ func main() {
 	}
 
 	// Initialize and set up the device manager
-	deviceManager := dev.NewInputDeviceManager()
+	deviceManager := handler.New()
 	defer deviceManager.Close()
 
 	// Add all matched devices to the manager
@@ -140,8 +138,8 @@ func main() {
 	}()
 
 	// Start processing events from all devices
-	slog.Info(fmt.Sprintf("Processing events from %d devices... Press Ctrl+C to exit\n", len(deviceManager.GetDevices())))
-	deviceManager.ProcessEvents(out, modeManager)
+	slog.Info(fmt.Sprintf("Processing events from %d devices... Press Ctrl+C to exit", len(deviceManager.GetDevices())))
+	deviceManager.ProcessEvents(out, busMgr)
 
 	// Wait for all processing to complete (typically won't reach here except on error)
 	deviceManager.Wait()

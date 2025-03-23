@@ -1,16 +1,10 @@
-package mode
+package bus
 
 import (
+	"github.com/jialeicui/golibevdev"
+
 	"github.com/jialeicui/keyswift/pkg/wininfo"
 )
-
-// Mode represents a key remapping mode/layer
-type Mode interface {
-	// Name returns the name of the mode
-	Name() string
-	// ProcessEvent processes an event and returns actions to execute
-	// Returns nil if no action should be taken
-}
 
 // Event represents any type of event that can trigger an action
 type Event struct {
@@ -24,7 +18,7 @@ type Event struct {
 
 // KeyPressEvent represents a keyboard key press
 type KeyPressEvent struct {
-	Keys     []string
+	Keys     []golibevdev.KeyEventCode
 	Pressed  bool // true for press, false for release
 	Repeated bool // true if key repeat
 }
@@ -40,12 +34,4 @@ type MouseClickEvent struct {
 // WindowFocusEvent represents a window focus change
 type WindowFocusEvent struct {
 	Window *wininfo.WinInfo
-}
-
-// ModeTransition represents a mode transition
-type ModeTransition struct {
-	// Mode to transition to, empty string means pop current mode
-	Mode string
-	// Push new mode or replace current mode
-	Push bool
 }

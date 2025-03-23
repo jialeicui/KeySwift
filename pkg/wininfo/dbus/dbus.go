@@ -13,12 +13,12 @@ import (
 var _ wininfo.WinGetter = (*Receiver)(nil)
 
 const (
-	BusName       = "com.github.keyswift.WindowMonitor"
-	BusPath       = "/com/github/keyswift/WindowMonitor"
-	BusInterface  = "com.github.keyswift.WindowMonitor"
+	BusName       = "com.github.keyswift.WinInfoReceiver"
+	BusPath       = "/com/github/keyswift/WinInfoReceiver"
+	BusInterface  = "com.github.keyswift.WinInfoReceiver"
 	introspectXML = `
 <node>
-    <interface name="com.github.keyswift.WindowMonitor">
+    <interface name="com.github.keyswift.WinInfoReceiver">
         <method name="UpdateActiveWindow">
             <arg type="s" direction="in"/>
         </method>
@@ -35,7 +35,7 @@ type Receiver struct {
 func (r *Receiver) UpdateActiveWindow(in string) *dbus.Error {
 	info := new(Info)
 	if err := json.Unmarshal([]byte(in), info); err != nil {
-		return dbus.NewError("com.github.keyswift.WindowMonitor.Error", []interface{}{err.Error()})
+		return dbus.NewError("com.github.keyswift.WinInfoReceiver.Error", []any{err.Error()})
 	}
 
 	r.current = &wininfo.WinInfo{
