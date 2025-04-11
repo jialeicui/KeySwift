@@ -111,3 +111,13 @@ func (m *Impl) SendKeys(keyCodes []keys.Key) {
 
 	slog.Debug("SendKeys done", "input", keyCodes)
 }
+
+func (m *Impl) UpdateWindowMonitor(windowInfo wininfo.WinGetter) {
+	m.windowInfo = windowInfo
+	if windowInfo != nil {
+		err := windowInfo.OnActiveWindowChange(m.handleWindowFocus)
+		if err != nil {
+			slog.Error("failed to register window focus handler", "error", err)
+		}
+	}
+}
