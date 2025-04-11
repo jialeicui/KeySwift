@@ -7,6 +7,8 @@ type WinGetter interface {
 	// The callback function will be called with the new active window information
 	// The function should return an error if it fails to register the callback
 	OnActiveWindowChange(ActiveWindowChangeCallback) error
+	// Close closes the window info service
+	Close()
 }
 
 type WinInfo struct {

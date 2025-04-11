@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jialeicui/golibevdev"
 	"github.com/samber/lo"
@@ -127,6 +128,30 @@ func main() {
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Try to reconnect DBus in the background
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if _, ok := windowMonitor.(*dbus.DegradedReceiver); ok {
+					slog.Info("Attempting to reconnect to DBus...")
+					newMonitor, err := dbus.New()
+					if err == nil {
+						slog.Info("Successfully reconnected to DBus")
+						windowMonitor = newMonitor
+						// Update bus manager's window monitor
+						busMgr.UpdateWindowMonitor(windowMonitor)
+					}
+				}
+			case <-sigChan:
+				return
+			}
+		}
+	}()
 
 	go func() {
 		<-sigChan
