@@ -145,6 +145,8 @@ func main() {
 						windowMonitor = newMonitor
 						// Update bus manager's window monitor
 						busMgr.UpdateWindowMonitor(windowMonitor)
+						// success, break
+						return
 					}
 				}
 			case <-sigChan:
