@@ -195,6 +195,9 @@ func (r *DegradedReceiver) GetActiveWindow() (*wininfo.WinInfo, error) {
 }
 
 func (r *DegradedReceiver) Close() {
+    // Perform cleanup for DegradedReceiver
+    r.options = nil // Reset options to prevent further use
+    slog.Info("DegradedReceiver closed")
 }
 
 func (r *DegradedReceiver) OnActiveWindowChange(callback wininfo.ActiveWindowChangeCallback) error {
