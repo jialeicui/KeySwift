@@ -25,10 +25,22 @@ var (
 	flagConfig           = flag.String("config", "", "Configuration file path (defaults to $XDG_CONFIG_HOME/keyswift/config.js)")
 	flagVerbose          = flag.Bool("verbose", false, "Enable verbose logging")
 	flagOutputDeviceName = flag.String("output-device-name", "keyswift", "Name of the virtual keyboard device")
+	flagVersion          = flag.Bool("version", false, "Print version information and exit")
+)
+
+// These variables are injected at compile time
+var (
+	version = "dev"
+	commit  = "unknown"
 )
 
 func main() {
 	flag.Parse()
+
+	if *flagVersion {
+		fmt.Printf("keyswift version %s (commit: %s)\n", version, commit)
+		os.Exit(0)
+	}
 
 	// Configure logging
 	if *flagVerbose {
