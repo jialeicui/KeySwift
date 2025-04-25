@@ -104,7 +104,7 @@ func (e *QuickJS) fastIgnore(session Bus) bool {
 	k := [maxPressed]golibevdev.KeyEventCode{}
 	copy(k[:], pressed)
 	_, ok := e.keysWatch[k]
-	slog.Debug("fastIgnore", "keys", pressed, "ok", !ok)
+	slog.Debug("check script rule hit", "keys", pressed, "yes", ok)
 	return !ok
 }
 
