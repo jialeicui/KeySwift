@@ -188,7 +188,7 @@ func (m *Handler) processDeviceEvents(dev *InputDevice, modeManager *bus.Impl) {
 				if _, ok := byPassKeys[k]; ok {
 					slog.Debug("drop key release event", "key", k.String())
 					delete(byPassKeys, k)
-					continue
+					// continue
 				}
 			}
 
