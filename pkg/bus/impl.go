@@ -90,23 +90,34 @@ func (m *Impl) SendKeys(keyCodes []keys.Key) {
 		return keys.IsModifier(cloned[i])
 	})
 
-	// modifier keys first
+	// Ensure we don't have duplicate key events
+	seen := make(map[keys.Key]bool)
+	var uniqueKeys []keys.Key
 	for _, key := range cloned {
-		err := m.out.WriteEvent(golibevdev.EvKey, key, 1)
-		if err != nil {
-			slog.Error("failed to send key event", "error", err)
+		if !seen[key] {
+			seen[key] = true
+			uniqueKeys = append(uniqueKeys, key)
 		}
 	}
 
-	// send sync event
+	// Press keys in order (modifiers first)
+	for _, key := range uniqueKeys {
+		err := m.out.WriteEvent(golibevdev.EvKey, key, 1)
+		if err != nil {
+			slog.Error("failed to send key press event", "error", err)
+		}
+	}
+
+	// Send sync event
 	_ = m.out.WriteEvent(golibevdev.EvSyn, golibevdev.SynReport, 0)
 
-	// send release event
-	for _, key := range cloned {
+	// Release keys in reverse order (regular keys first, then modifiers)
+	for i := len(uniqueKeys) - 1; i >= 0; i-- {
+		key := uniqueKeys[i]
 		_ = m.out.WriteEvent(golibevdev.EvKey, key, 0)
 	}
 
-	// send sync event
+	// Send final sync event
 	_ = m.out.WriteEvent(golibevdev.EvSyn, golibevdev.SynReport, 0)
 
 	slog.Debug("SendKeys done", "input", keyCodes)
