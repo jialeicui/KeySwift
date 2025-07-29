@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jialeicui/golibevdev"
-	"github.com/samber/lo"
 
 	"github.com/jialeicui/keyswift/pkg/bus"
 )
@@ -198,6 +197,12 @@ func (m *Handler) processDeviceEvents(dev *InputDevice, modeManager *bus.Impl) {
 	}
 }
 
+
+// Wait waits for all event processing to complete
+func (m *Handler) Wait() {
+	m.wg.Wait()
+}
+
 // processEventStack processes a stack of events and determines if they should be handled
 // return true if the events should be handled, false if the events should be forwarded
 func (m *Handler) processEventStack(
@@ -207,7 +212,10 @@ func (m *Handler) processEventStack(
 	forceNoPassThrough bool,
 ) bool {
 	// Get currently pressed keys
-	pressedKeys := lo.Keys(keyStates)
+	var pressedKeys []golibevdev.KeyEventCode
+	for key := range keyStates {
+		pressedKeys = append(pressedKeys, key)
+	}
 
 	if len(pressedKeys) == 0 {
 		// No keys are pressed, just forward all events
@@ -258,11 +266,6 @@ func (m *Handler) sendSingleKey(code golibevdev.KeyEventCode, value int32) {
 	_ = m.out.WriteEvent(golibevdev.EvKey, code, value)
 	_ = m.out.WriteEvent(golibevdev.EvSyn, golibevdev.SynReport, 0)
 	slog.Debug("send single key", "code", code, "value", value)
-}
-
-// Wait waits for all event processing to complete
-func (m *Handler) Wait() {
-	m.wg.Wait()
 }
 
 // Close closes all input devices
