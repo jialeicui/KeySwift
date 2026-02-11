@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -8,21 +9,17 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
-	"github.com/jialeicui/golibevdev"
-	"github.com/samber/lo"
-
-	"github.com/jialeicui/keyswift/pkg/bus"
+	"github.com/jialeicui/keyswift/pkg/config"
 	"github.com/jialeicui/keyswift/pkg/evdev"
-	"github.com/jialeicui/keyswift/pkg/handler"
+	"github.com/jialeicui/keyswift/pkg/statemachine"
 	"github.com/jialeicui/keyswift/pkg/utils"
 	"github.com/jialeicui/keyswift/pkg/wininfo/dbus"
 )
 
 var (
 	flagKeyboards        = flag.String("keyboards", "HHKB", "Comma-separated list of keyboard device name substrings")
-	flagConfig           = flag.String("config", "", "Configuration file path (defaults to $XDG_CONFIG_HOME/keyswift/config.js)")
+	flagConfig           = flag.String("config", "", "Configuration file path (defaults to $XDG_CONFIG_HOME/keyswift/config.json)")
 	flagVerbose          = flag.Bool("verbose", false, "Enable verbose logging")
 	flagOutputDeviceName = flag.String("output-device-name", "keyswift", "Name of the virtual keyboard device")
 	flagVersion          = flag.Bool("version", false, "Print version information and exit")
@@ -43,17 +40,26 @@ func main() {
 	}
 
 	// Configure logging
+	logLevel := slog.LevelInfo
 	if *flagVerbose {
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		})))
+		logLevel = slog.LevelDebug
 	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+	})))
 
 	// Load configuration
 	configPath := *flagConfig
 	if configPath == "" {
 		configPath = utils.DefaultConfigPath()
 	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		slog.Error("Failed to load configuration", "error", err, "path", configPath)
+		os.Exit(1)
+	}
+	slog.Info("Configuration loaded", "mappings", len(cfg.Mappings), "vars", len(cfg.Vars))
 
 	// Initialize window info service
 	windowMonitor, err := dbus.New()
@@ -65,26 +71,11 @@ func main() {
 	slog.Info("Window Monitor service is running...")
 
 	// Initialize virtual keyboard for output
-	out, err := golibevdev.NewVirtualKeyboard(*flagOutputDeviceName)
+	out, err := statemachine.NewRecoveringOutputDevice(*flagOutputDeviceName)
 	if err != nil {
 		slog.Error("Failed to create virtual keyboard", "error", err)
 		os.Exit(1)
 	}
-	defer out.Close()
-
-	script, err := os.ReadFile(configPath)
-	if err != nil {
-		slog.Error("Failed to read configuration file", "error", err)
-		os.Exit(1)
-	}
-
-	// Initialize bus manager
-	busMgr, err := bus.New(string(script), windowMonitor, out)
-	if err != nil {
-		slog.Error("Failed to initialize bus manager", "error", err)
-		os.Exit(1)
-	}
-	slog.Info("bus manager initialized")
 
 	// Find input devices
 	devs, err := evdev.NewOverviewImpl().ListInputDevices()
@@ -95,25 +86,7 @@ func main() {
 
 	// Parse keyboard patterns and find matching devices
 	keyboardPatterns := strings.Split(*flagKeyboards, ",")
-	var matchedDevices []*evdev.InputDevice
-
-	for _, pattern := range keyboardPatterns {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-
-		matches := lo.Filter(devs, func(item *evdev.InputDevice, _ int) bool {
-			return strings.Contains(item.Name, pattern) && item.Name != *flagOutputDeviceName
-		})
-
-		matchedDevices = append(matchedDevices, matches...)
-	}
-
-	// Remove duplicates
-	matchedDevices = lo.UniqBy(matchedDevices, func(dev *evdev.InputDevice) string {
-		return dev.Path
-	})
+	matchedDevices := findMatchingDevices(devs, keyboardPatterns)
 
 	if len(matchedDevices) == 0 {
 		slog.Info("Available keyboards:")
@@ -124,62 +97,61 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize and set up the device manager
-	deviceManager := handler.New()
-	defer deviceManager.Close()
+	// Initialize handler with state machine
+	handler := statemachine.NewHandlerWithStateMachine(cfg)
+	defer handler.Close()
 
-	// Add all matched devices to the manager
 	for _, d := range matchedDevices {
-		slog.Info("Using keyboard: ", d.Name, d.Path)
-		if err := deviceManager.AddDevice(d.Name, d.Path); err != nil {
+		slog.Info("Using keyboard", "name", d.Name, "path", d.Path)
+		if err := handler.AddDevice(d.Name, d.Path); err != nil {
 			slog.Warn("Failed to add device", "device", d.Name, "error", err)
 			continue
 		}
 	}
 
-	// Handle signals
+	// Setup signal handling with context cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Try to reconnect DBus in the background
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				if _, ok := windowMonitor.(*dbus.DegradedReceiver); ok {
-					slog.Info("Attempting to reconnect to DBus...")
-					newMonitor, err := dbus.New()
-					if err == nil {
-						slog.Info("Successfully reconnected to DBus")
-						windowMonitor = newMonitor
-						// Update bus manager's window monitor
-						busMgr.UpdateWindowMonitor(windowMonitor)
-						// success, break
-						return
-					}
-				}
-			case <-sigChan:
-				return
-			}
-		}
-	}()
 
 	go func() {
 		<-sigChan
 		slog.Info("Shutting down...")
-		deviceManager.Close()
-		out.Close()
-		windowMonitor.Close()
-		os.Exit(0)
+		cancel()
+		handler.Close()
 	}()
 
-	// Start processing events from all devices
-	slog.Info(fmt.Sprintf("Processing events from %d devices... Press Ctrl+C to exit", len(deviceManager.GetDevices())))
-	deviceManager.ProcessEvents(out, busMgr)
+	// Start processing events
+	slog.Info(fmt.Sprintf("Processing events from %d devices... Press Ctrl+C to exit", len(matchedDevices)))
+	handler.ProcessEvents(out, windowMonitor)
 
-	// Wait for all processing to complete (typically won't reach here except on error)
-	deviceManager.Wait()
+	// Wait for context cancellation or processing to complete
+	<-ctx.Done()
+	slog.Info("Shutdown complete")
+
+	handler.Wait()
+}
+
+// findMatchingDevices filters input devices by pattern, removing duplicates
+func findMatchingDevices(devs []*evdev.InputDevice, patterns []string) []*evdev.InputDevice {
+	seen := make(map[string]bool)
+	var matched []*evdev.InputDevice
+
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
+		for _, dev := range devs {
+			if strings.Contains(dev.Name, pattern) && dev.Name != *flagOutputDeviceName && !seen[dev.Path] {
+				seen[dev.Path] = true
+				matched = append(matched, dev)
+			}
+		}
+	}
+
+	return matched
 }

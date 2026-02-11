@@ -1,11 +1,11 @@
 # KeySwift
 
-KeySwift is a keyboard remapping tool designed for Linux gnome desktop environments. It allows you to customize keyboard mappings for different applications, enhancing your productivity and typing experience.
+KeySwift is a keyboard remapping tool designed for Linux GNOME desktop environments. It allows you to customize keyboard mappings for different applications, enhancing your productivity and typing experience.
 
 ## Features
 
 - **Application-specific remapping**: Define custom keyboard mappings for specific applications
-- **Flexible configuration**: Simple and intuitive configuration format
+- **Flexible configuration**: Simple and intuitive JSON configuration format
 
 ## Installation
 
@@ -26,36 +26,43 @@ make
 
 ## Configuration
 
-Create a configuration file at `~/.config/keyswift/config.js`. Here's an example:
+Create a configuration file at `~/.config/keyswift/config.json`. The configuration is a JSON array of rule objects.
 
-```js
-const curWindowClass = KeySwift.getActiveWindowClass();
-const Terminals = ["kitty", "Gnome-terminal", "org.gnome.Terminal"];
-const inTerminal = Terminals.includes(curWindowClass);
+Each rule has a `type` field:
+- `"var"` — define a named variable (list of window classes) for reuse
+- `"map"` — define a key mapping with optional window conditions
 
-KeySwift.onKeyPress(["cmd", "v"], () => {
-    if (curWindowClass === "com.mitchellh.ghostty") {
-        KeySwift.sendKeys(["shift", "ctrl", "v"]);
-        return
-    }
+### Example
 
-    if (inTerminal) {
-        KeySwift.sendKeys(["cmd", "shift", "v"]);
-    }
-});
+```json
+[
+  {"type": "var", "name": "terminals", "value": ["kitty", "Gnome-terminal", "org.gnome.Terminal"]},
+
+  {"type": "map", "input": ["cmd", "c"], "output": ["ctrl", "c"],       "when": {"notWindow": "$terminals"}},
+  {"type": "map", "input": ["cmd", "c"], "output": ["ctrl", "shift", "c"], "when": {"window": "$terminals"}},
+  {"type": "map", "input": ["cmd", "v"], "output": ["ctrl", "v"],       "when": {"notWindow": "$terminals"}},
+  {"type": "map", "input": ["cmd", "v"], "output": ["ctrl", "shift", "v"], "when": {"window": "$terminals"}}
+]
 ```
 
-You can also see more examples in the [examples](examples) directory.
+See the [examples](examples) directory for a more comprehensive configuration.
 
-KeySwift's config is implemented based on [QuickJS](https://bellard.org/quickjs), and all available objects and functions are as follows:
+### Key Names (case-insensitive)
 
-```js
-const KeySwift = {
-    getActiveWindowClass: () => string,
-    sendKeys: (keys: string[]) => void,
-    onKeyPress: (keys: string[], callback: () => void) => void,
-}
-```
+| Category   | Names |
+|------------|-------|
+| Modifiers  | `ctrl`, `alt`, `cmd`/`meta`/`super`, `shift` |
+| Letters    | `a`–`z` |
+| Numbers    | `0`–`9` |
+| Function   | `f1`–`f12` |
+| Navigation | `home`, `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right` |
+| Special    | `esc`, `tab`, `space`, `enter`, `backspace`, `delete`, `insert` |
+
+### Conditions (`when`)
+
+- `window`: mapping applies only when the active window class matches (string or array)
+- `notWindow`: mapping applies when the active window class does **not** match (string or array)
+- Use `$varname` to reference a previously-defined `var` rule
 
 ## Acknowledgments
 
@@ -67,20 +74,19 @@ KeySwift was inspired by several excellent projects:
 
 Thank you to the maintainers of these projects for your contributions to open-source keyboard customization tools!
 
-This project also draws inspiration from [AutoHotkey](https://www.autohotkey.com)'s design philosophy. Thanks to this amazing project
+This project also draws inspiration from [AutoHotkey](https://www.autohotkey.com)'s design philosophy. Thanks to this amazing project.
 
 ## Tips
 
 ### How to get the active window class
 
-You can use the `cmd+i` shortcut to print the active window class to the console with the following configuration:
+Run the following command to print all visible window classes so you can find the right name for your application:
 
-```js
-KeySwift.onKeyPress(["cmd", "i"], () => {
-    const curWindowClass = KeySwift.getActiveWindowClass();
-    console.log(curWindowClass);
-});
+```bash
+xprop WM_CLASS | awk '{print $NF}'
+# Then click the window you want to identify
 ```
+
 ### How to run the program
 
 1. Install the keyswift gnome extension
@@ -105,7 +111,7 @@ echo 'KERNEL=="uinput", GROUP="input", TAG+="uaccess"' | sudo tee /etc/udev/rule
 
 ```bash
 # XXX is the substring of the keyboard device name
-./keyswift -keyboards XXX -config ~/.config/keyswift/config.js
+./keyswift -keyboards XXX -config ~/.config/keyswift/config.json
 ```
 - if you have multiple keyboards, you can use comma to separate them
 - if you don't know the device name, you can leave it blank and the program will print all the keyboard device names and you can select one of them

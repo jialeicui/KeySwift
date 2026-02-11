@@ -15,5 +15,5 @@ func DefaultConfigPath() string {
 		}
 		configDir = filepath.Join(homeDir, ".config")
 	}
-	return filepath.Join(configDir, "keyswift", "config.js")
+	return filepath.Join(configDir, "keyswift", "config.json")
 }
