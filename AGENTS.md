@@ -2,26 +2,23 @@
 
 ## Project Overview
 
-KeySwift is a Linux keyboard remapping tool designed specifically for GNOME desktop environments. It enables application-specific key mappings using JavaScript configuration files, allowing users to customize keyboard shortcuts for different applications.
+KeySwift is a Linux keyboard remapping tool designed specifically for GNOME desktop environments. It enables application-specific key mappings using a JSON configuration file, allowing users to customize keyboard shortcuts for different applications.
 
 ### Key Features
 - **Application-specific remapping**: Define custom keyboard mappings for specific applications based on window class
-- **JavaScript configuration**: Flexible configuration using QuickJS JavaScript engine
+- **JSON configuration**: Simple, static configuration using a JSON array of rules
 - **Low-level input handling**: Uses Linux evdev subsystem for direct keyboard input capture
 - **D-Bus integration**: Communicates with GNOME Shell extension for window focus tracking
 
 ## Technology Stack
 
 - **Language**: Go 1.22+
-- **JavaScript Engine**: QuickJS (via buke/quickjs-go)
 - **System Dependencies**: 
   - libevdev-dev (Linux input event handling)
   - D-Bus (GNOME integration)
 - **Key Go Dependencies**:
   - `github.com/godbus/dbus/v5` - D-Bus bindings for Go
-  - `github.com/buke/quickjs-go` - QuickJS JavaScript engine bindings
   - `github.com/jialeicui/golibevdev` - Linux evdev wrapper
-  - `github.com/samber/lo` - Go utilities library
   - `github.com/stretchr/testify` - Testing framework
 
 ## Project Structure
@@ -30,29 +27,28 @@ KeySwift is a Linux keyboard remapping tool designed specifically for GNOME desk
 .
 ├── cmd/keyswift/main.go          # Application entry point and CLI
 ├── pkg/
-│   ├── bus/                      # Event processing and coordination
-│   │   ├── impl.go               # Main bus implementation
-│   │   ├── mode.go               # Event type definitions
-│   │   └── session.go            # Per-event processing session
-│   ├── engine/                   # JavaScript engine integration
-│   │   ├── interfaces.go         # Engine and Bus interfaces
-│   │   └── quickjs.go            # QuickJS implementation
+│   ├── config/                   # Configuration loading and parsing
+│   │   └── types.go              # Config types and JSON loader
+│   ├── statemachine/             # Key event processing
+│   │   ├── machine.go            # Core state machine
+│   │   ├── config_engine.go      # Config-based mapping engine
+│   │   ├── config_integration.go # State machine + config integration
+│   │   ├── handler_integration.go# Input device management
+│   │   ├── adapter.go            # Output device adapter
+│   │   └── interfaces.go         # Core interfaces
 │   ├── evdev/                    # Input device management
 │   │   ├── evdev.go              # Core types
 │   │   └── overview.go           # Device enumeration
-│   ├── handler/                  # Input event handling
-│   │   ├── handler.go            # Main event processor
-│   │   └── modifier.go           # Modifier key state tracking
 │   ├── keys/                     # Key code mappings
 │   │   └── keys.go               # Key name to code conversion
 │   ├── utils/                    # Utilities
-│   │   ├── config.go             # Configuration path helpers
-│   │   └── cache/                # Caching utilities
+│   │   └── config.go             # Configuration path helpers
 │   └── wininfo/                  # Window information
 │       ├── wininfo.go            # Interface definitions
 │       └── dbus/                 # D-Bus implementation
 ├── examples/
-│   └── config.js                 # Example configuration
+│   ├── config.json               # Example configuration (compact)
+│   └── config.json5              # Example configuration (annotated)
 ├── Makefile                      # Build automation
 └── go.mod                        # Go module definition
 ```
@@ -61,25 +57,20 @@ KeySwift is a Linux keyboard remapping tool designed specifically for GNOME desk
 
 ### Data Flow
 
-1. **Input Capture** (`pkg/handler/`)
+1. **Input Capture** (`pkg/statemachine/handler_integration.go`)
    - Grabs physical keyboard devices via evdev
    - Processes raw key events
-   - Tracks modifier key states
-   - Manages key press/release sequences
+   - Manages device reconnection
 
-2. **Event Processing** (`pkg/bus/`)
-   - Receives key events from handler
-   - Creates isolated session per event
-   - Executes JavaScript configuration
-   - Routes output to virtual keyboard
+2. **Event Processing** (`pkg/statemachine/`)
+   - State machine receives key events
+   - Evaluates mapping rules against current key state and window class
+   - Routes output commands to virtual keyboard
 
-3. **JavaScript Engine** (`pkg/engine/`)
-   - Compiles user configuration to bytecode
-   - Exposes `KeySwift` global object with APIs:
-     - `getActiveWindowClass()` - Get current application
-     - `sendKeys(keys[])` - Send key combination
-     - `onKeyPress(keys[], callback)` - Register key handler
-   - Fast-path filtering for unregistered key combinations
+3. **Config Mapping Engine** (`pkg/statemachine/config_engine.go`)
+   - Loads static rules from `pkg/config/`
+   - Set-based matching: key combinations are unordered sets
+   - Filters by window class conditions (`window` / `notWindow`)
 
 4. **Window Detection** (`pkg/wininfo/`)
    - D-Bus service receives window info from GNOME extension
@@ -124,29 +115,34 @@ sudo go test -v ./pkg/utils/cache/
 
 ## Configuration
 
-### JavaScript API
+### JSON Format
 
-The configuration file (`~/.config/keyswift/config.js`) has access to:
+The configuration file (`~/.config/keyswift/config.json`) is a JSON array of rule objects.
 
-```javascript
-const KeySwift = {
-    // Returns the window class of the currently focused application
-    getActiveWindowClass: () => string,
-    
-    // Sends a key combination (modifiers: ctrl, alt, cmd/meta/super, shift)
-    sendKeys: (keys: string[]) => void,
-    
-    // Registers a callback for specific key combination
-    // Must be called at top level, not inside callbacks or conditionals
-    onKeyPress: (keys: string[], callback: () => void) => void,
-}
+**Rule types:**
+
+```json
+[
+  {"type": "var", "name": "terminals", "value": ["kitty", "Gnome-terminal"]},
+  {
+    "type": "map",
+    "input": ["cmd", "c"],
+    "output": ["ctrl", "c"],
+    "when": {"notWindow": "$terminals"}
+  }
+]
 ```
+
+- **`var`**: Defines a named list of window classes (`$varname` reference)
+- **`map`**: Maps an input key combo to an output combo, with optional `when` condition
+  - `when.window`: apply only when active window class matches
+  - `when.notWindow`: apply only when active window class does **not** match
 
 ### Example Configuration
 
-See `examples/config.js` for a comprehensive example including:
+See `examples/config.json` and `examples/config.json5` (annotated) for comprehensive examples including:
 - Terminal-specific mappings (kitty, GNOME Terminal, Ghostty)
-- IDE mappings (JetBrains, Cursor, Sublime Text)
+- IDE mappings (JetBrains)
 - macOS-like shortcuts for Linux
 - Chrome tab switching shortcuts
 - Emacs-style navigation
@@ -166,16 +162,16 @@ See `examples/config.js` for a comprehensive example including:
 
 ```bash
 # List available keyboards and filter by pattern
-./keyswift -keyboards "HHKB" -config ~/.config/keyswift/config.js
+./keyswift -keyboards "HHKB" -config ~/.config/keyswift/config.json
 
 # Multiple keyboards (comma-separated)
-./keyswift -keyboards "HHKB,Logitech" -config ~/.config/keyswift/config.js
+./keyswift -keyboards "HHKB,Logitech" -config ~/.config/keyswift/config.json
 
 # Verbose logging
-./keyswift -keyboards "HHKB" -config ~/.config/keyswift/config.js -verbose
+./keyswift -keyboards "HHKB" -config ~/.config/keyswift/config.json -verbose
 
 # Custom output device name
-./keyswift -keyboards "HHKB" -output-device-name "my-keyboard" -config ~/.config/keyswift/config.js
+./keyswift -keyboards "HHKB" -output-device-name "my-keyboard" -config ~/.config/keyswift/config.json
 ```
 
 **Important**: Do not run with `sudo`. The application requires user-level permissions with `input` group membership.
@@ -190,9 +186,9 @@ See `examples/config.js` for a comprehensive example including:
 - Structured logging using `log/slog`
 
 ### Naming
-- Interfaces with `-er` suffix (e.g., `WinGetter`, `Engine`)
-- Implementation types with descriptive names (e.g., `Impl`, `QuickJS`, `Receiver`)
-- Constants for magic strings (e.g., `FuncSendKeys`, `KeySwiftObj`)
+- Interfaces with `-er` suffix (e.g., `WinGetter`, `MappingEngine`)
+- Implementation types with descriptive names (e.g., `Impl`, `ConfigMappingEngine`, `Receiver`)
+- Constants for key codes and configuration field names
 
 ### Error Handling
 - Return errors with context
@@ -203,11 +199,7 @@ See `examples/config.js` for a comprehensive example including:
 
 1. **Input Device Access**: Requires membership in `input` group
 2. **D-Bus Communication**: Exposes service on session bus
-3. **JavaScript Execution**: User-provided scripts run in QuickJS sandbox with memory limits:
-   - Memory limit: 1280 KB
-   - GC threshold: 2560 KB
-   - Max stack size: 65534
-   - Execution timeout: 0 (disabled)
+3. **Configuration**: JSON config is parsed at startup; no code execution at runtime
 
 ## Key Implementation Details
 

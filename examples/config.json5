@@ -1,0 +1,279 @@
+// KeySwift Configuration - JSON5 format (with comments)
+// Save as ~/.config/keyswift/config.json after removing comments, or use a JSON5 parser
+//
+// Configuration is an array of rule objects. Each rule has a "type" field:
+// - type: "var" - Define a variable for reuse
+// - type: "map" - Define a key mapping
+
+[
+  // ========== Variables ==========
+  // Variables allow you to group window classes and reuse them in conditions.
+  // Use $varname to reference a variable.
+  
+  // Terminal applications
+  {
+    "type": "var",
+    "name": "terminals",
+    "value": [
+      "kitty",
+      "Gnome-terminal",
+      "org.gnome.Terminal",
+      "com.mitchellh.ghostty"
+    ]
+  },
+  
+  // JetBrains IDEs
+  {
+    "type": "var",
+    "name": "jetbrains",
+    "value": [
+      "jetbrains-goland",
+      "jetbrains-pycharm",
+      "jetbrains-idea"
+    ]
+  },
+  
+  // Applications with vim mode (need special handling)
+  {
+    "type": "var",
+    "name": "vimMode",
+    "value": ["Cursor", "$jetbrains"]  // Can reference other variables
+  },
+  
+  // ========== Key Mappings ==========
+  // Each mapping has:
+  // - input: Array of key names to match (e.g., ["cmd", "c"])
+  // - output: Array of key names to send (e.g., ["ctrl", "c"])
+  // - when (optional): Conditions for when this mapping applies
+  
+  // Key names (case-insensitive):
+  // Modifiers: ctrl/ctrl-l/ctrl-r, alt/alt-l/alt-r, cmd/meta/super (all left meta), shift/shift-l/shift-r
+  // Letters: a, b, c, ..., z
+  // Numbers: 0, 1, 2, ..., 9
+  // Function keys: f1, f2, ..., f12
+  // Special: esc, tab, space, enter/return, backspace, delete, home, end, 
+  //          pageup, pagedown, up, down, left, right, insert
+  // Numpad: kp0-kp9, kpenter, kpplus, kpminus, etc.
+  
+  // --- Basic macOS-like Shortcuts ---
+  
+  // Cmd+C: Copy
+  // Don't apply in terminals (use Ctrl+Shift+C instead)
+  {
+    "type": "map",
+    "input": ["cmd", "c"],
+    "output": ["ctrl", "c"],
+    "when": { "notWindow": "$terminals" }
+  },
+  
+  // Cmd+C in terminals: Ctrl+Shift+C
+  {
+    "type": "map",
+    "input": ["cmd", "c"],
+    "output": ["ctrl", "shift", "c"],
+    "when": { "window": "$terminals" }
+  },
+  
+  // Cmd+V: Paste
+  {
+    "type": "map",
+    "input": ["cmd", "v"],
+    "output": ["ctrl", "v"],
+    "when": { "notWindow": "$terminals" }
+  },
+  
+  // Cmd+V in terminals: Ctrl+Shift+V
+  {
+    "type": "map",
+    "input": ["cmd", "v"],
+    "output": ["ctrl", "shift", "v"],
+    "when": { "window": "$terminals" }
+  },
+  
+  // Cmd+X: Cut
+  {
+    "type": "map",
+    "input": ["cmd", "x"],
+    "output": ["ctrl", "x"]
+  },
+  
+  // Cmd+A: Select All
+  {
+    "type": "map",
+    "input": ["cmd", "a"],
+    "output": ["ctrl", "a"]
+  },
+  
+  // Cmd+Z: Undo
+  {
+    "type": "map",
+    "input": ["cmd", "z"],
+    "output": ["ctrl", "z"]
+  },
+  
+  // Cmd+Shift+Z: Redo
+  {
+    "type": "map",
+    "input": ["cmd", "shift", "z"],
+    "output": ["ctrl", "shift", "z"]
+  },
+  
+  // Cmd+S: Save
+  {
+    "type": "map",
+    "input": ["cmd", "s"],
+    "output": ["ctrl", "s"]
+  },
+  
+  // Cmd+F: Find
+  {
+    "type": "map",
+    "input": ["cmd", "f"],
+    "output": ["ctrl", "f"]
+  },
+  
+  // Cmd+W: Close tab/window
+  {
+    "type": "map",
+    "input": ["cmd", "w"],
+    "output": ["ctrl", "w"]
+  },
+  
+  // Cmd+T: New tab
+  {
+    "type": "map",
+    "input": ["cmd", "t"],
+    "output": ["ctrl", "t"]
+  },
+  
+  // --- Chrome Tab Switching ---
+  
+  {
+    "type": "map",
+    "input": ["cmd", "1"],
+    "output": ["ctrl", "1"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "2"],
+    "output": ["ctrl", "2"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "3"],
+    "output": ["ctrl", "3"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "4"],
+    "output": ["ctrl", "4"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "5"],
+    "output": ["ctrl", "5"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "6"],
+    "output": ["ctrl", "6"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "7"],
+    "output": ["ctrl", "7"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "8"],
+    "output": ["ctrl", "8"],
+    "when": { "window": "Google-chrome" }
+  },
+  {
+    "type": "map",
+    "input": ["cmd", "9"],
+    "output": ["ctrl", "9"],
+    "when": { "window": "Google-chrome" }
+  },
+  
+  // --- Emacs Navigation (disabled in terminals and vim-mode apps) ---
+  
+  // Ctrl+A: Home
+  {
+    "type": "map",
+    "input": ["ctrl", "a"],
+    "output": ["home"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+E: End
+  {
+    "type": "map",
+    "input": ["ctrl", "e"],
+    "output": ["end"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+B: Left arrow
+  {
+    "type": "map",
+    "input": ["ctrl", "b"],
+    "output": ["left"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+F: Right arrow
+  {
+    "type": "map",
+    "input": ["ctrl", "f"],
+    "output": ["right"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+N: Down arrow
+  {
+    "type": "map",
+    "input": ["ctrl", "n"],
+    "output": ["down"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+P: Up arrow
+  {
+    "type": "map",
+    "input": ["ctrl", "p"],
+    "output": ["up"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+D: Delete
+  {
+    "type": "map",
+    "input": ["ctrl", "d"],
+    "output": ["delete"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+H: Backspace
+  {
+    "type": "map",
+    "input": ["ctrl", "h"],
+    "output": ["backspace"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  },
+  
+  // Ctrl+K: Kill to end of line (Shift+End, Delete)
+  {
+    "type": "map",
+    "input": ["ctrl", "k"],
+    "output": ["shift", "end", "delete"],
+    "when": { "notWindow": ["$terminals", "$vimMode"] }
+  }
+]

@@ -42,6 +42,11 @@ func (r *Receiver) UpdateActiveWindow(in string) *dbus.Error {
 		return dbus.NewError("com.github.keyswift.WinInfoReceiver.Error", []any{err.Error()})
 	}
 
+	// Only log and trigger callback if window class actually changed
+	if r.current == nil || r.current.Class != info.Class {
+		slog.Info("Active window changed", "from", r.current, "to", info)
+	}
+
 	r.current = &wininfo.WinInfo{
 		Title: info.Title,
 		Class: info.Class,

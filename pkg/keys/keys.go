@@ -17,6 +17,7 @@ var Modifiers = map[Key]struct{}{
 	golibevdev.KeyRightShift: {},
 	golibevdev.KeyRightCtrl:  {},
 	golibevdev.KeyRightAlt:   {},
+	golibevdev.KeyRightMeta:  {},
 }
 
 var keyMap = map[string]Key{
@@ -64,13 +65,21 @@ func init() {
 func GetKeyCodes(keys []string) ([]Key, error) {
 	keyCodes := make([]Key, 0, len(keys))
 	for _, key := range keys {
-		c, ok := keyMap[strings.ToLower(key)]
-		if !ok {
-			return nil, fmt.Errorf("unknown key: %s", key)
+		c, err := GetKeyCode(key)
+		if err != nil {
+			return nil, err
 		}
 		keyCodes = append(keyCodes, c)
 	}
 	return keyCodes, nil
+}
+
+func GetKeyCode(key string) (Key, error) {
+	c, ok := keyMap[strings.ToLower(key)]
+	if !ok {
+		return 0, fmt.Errorf("unknown key: %s", key)
+	}
+	return c, nil
 }
 
 func IsModifier(key golibevdev.KeyEventCode) bool {
