@@ -3,6 +3,7 @@ package statemachine
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 )
@@ -263,6 +264,43 @@ func (sb *StateBinder) IsOutputKeyBound(key KeyCode) bool {
 	defer sb.mu.RUnlock()
 	_, ok := sb.outputToInput[key]
 	return ok
+}
+
+// HasMatchingActiveBinding reports whether an active binding already exists
+// with the given input and output key sets. Used by ApplyCommands to avoid
+// accumulating duplicate bindings when the same mapping fires repeatedly
+// (e.g. key autorepeat past the debounce threshold).
+func (sb *StateBinder) HasMatchingActiveBinding(inputKeys, outputKeys []KeyCode) bool {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+
+	for _, b := range sb.bindings {
+		if b.Status != BindingActive {
+			continue
+		}
+		if sortedKeySetsEqual(b.InputKeys, inputKeys) &&
+			sortedKeySetsEqual(b.OutputKeys, outputKeys) {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeySetsEqual compares two key slices as unordered sets.
+func sortedKeySetsEqual(a, b []KeyCode) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aSorted := append([]KeyCode(nil), a...)
+	bSorted := append([]KeyCode(nil), b...)
+	sort.Slice(aSorted, func(i, j int) bool { return aSorted[i] < aSorted[j] })
+	sort.Slice(bSorted, func(i, j int) bool { return bSorted[i] < bSorted[j] })
+	for i := range aSorted {
+		if aSorted[i] != bSorted[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // GetBoundInputKeys returns the input keys bound to an output key

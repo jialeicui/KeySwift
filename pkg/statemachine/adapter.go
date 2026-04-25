@@ -208,12 +208,15 @@ func (e *SimpleMappingEngine) Match(state SemanticState) ([]OutputCommand, bool)
 	return nil, false
 }
 
-// PrefixMatch implements MappingEngine
-func (e *SimpleMappingEngine) PrefixMatch(keys []KeyCode) []MappingID {
+// PrefixMatch implements MappingEngine.
+// Returns mapping IDs whose input keys contain `queryKeys` as a subset.
+// This matches the semantic the SSM relies on for modifier classification
+// and aligns with ConfigMappingEngine.PrefixMatch.
+func (e *SimpleMappingEngine) PrefixMatch(queryKeys []KeyCode) []MappingID {
 	var matches []MappingID
 
 	for i, mapping := range e.mappings {
-		if e.isPrefix(keys, mapping.Input) {
+		if isKeySubset(queryKeys, mapping.Input) {
 			matches = append(matches, MappingID(fmt.Sprintf("mapping-%d", i)))
 		}
 	}
@@ -241,18 +244,20 @@ func (e *SimpleMappingEngine) matches(input, pattern []KeyCode) bool {
 	return true
 }
 
-// isPrefix checks if keys is a prefix of pattern
-func (e *SimpleMappingEngine) isPrefix(keys, pattern []KeyCode) bool {
-	if len(keys) > len(pattern) {
+// isKeySubset reports whether every key in `query` is present in `target`.
+func isKeySubset(query, target []KeyCode) bool {
+	if len(query) > len(target) {
 		return false
 	}
-
-	for i, key := range keys {
-		if key != pattern[i] {
+	targetSet := make(map[KeyCode]bool, len(target))
+	for _, k := range target {
+		targetSet[k] = true
+	}
+	for _, k := range query {
+		if !targetSet[k] {
 			return false
 		}
 	}
-
 	return true
 }
 

@@ -78,8 +78,11 @@ func (osm *OSM) ApplyCommands(commands []OutputCommand, inputKeys []KeyCode, map
 		}
 	}
 
-	// Create binding between input and output keys
-	if len(inputKeys) > 0 && len(toPress) > 0 {
+	// Create binding between input and output keys. Skip if an identical
+	// active binding already exists — repeating the same mapping (autorepeat,
+	// rapid retap) shouldn't accumulate phantom bindings.
+	if len(inputKeys) > 0 && len(toPress) > 0 &&
+		!osm.binder.HasMatchingActiveBinding(inputKeys, toPress) {
 		osm.binder.CreateBinding(inputKeys, toPress, ReleaseOnAnyBoundKeyReleased)
 	}
 

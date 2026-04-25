@@ -3,6 +3,7 @@ package statemachine
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -678,4 +679,398 @@ func TestIsModifier(t *testing.T) {
 	assert.False(t, IsModifier(golibevdev.KeyA))
 	assert.False(t, IsModifier(golibevdev.KeySpace))
 	assert.False(t, IsModifier(golibevdev.KeyEnter))
+}
+
+// =============================================================================
+// Stuck-key regression tests
+//
+// Cover the bug where a release event triggered a re-match against the
+// remaining ism keys, ran handleMapping, and returned without forwarding
+// the release of the just-released key. If that key had been forwarded as
+// passthrough, it stayed pressed on the virtual keyboard forever — the
+// "permanently held key" symptom users reported. See machine.go
+// handleEvent / handleReleaseEvent for the corresponding fix.
+// =============================================================================
+
+// TestMachine_PassthroughKeyReleaseDoesNotStickOnOS reproduces the original
+// bug. Pre-fix the release event for X (forwarded as passthrough) was eaten
+// by the matched-on-release path and X remained pressed on the OS forever.
+func TestMachine_PassthroughKeyReleaseDoesNotStickOnOS(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyC},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyC},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	// Press Cmd → absorbed.
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyPress, Timestamp: now, Device: "kbd",
+	}))
+	// Press X → no Cmd+X rule, flushes Cmd, forwards X via passthrough.
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyX, Action: KeyPress,
+		Timestamp: now.Add(10 * time.Millisecond), Device: "kbd",
+	}))
+	// Press C → no Cmd+X+C rule, forwards C via passthrough.
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyC, Action: KeyPress,
+		Timestamp: now.Add(20 * time.Millisecond), Device: "kbd",
+	}))
+
+	mock.Clear()
+
+	// Release X. Pre-fix: ism keys after release are {Cmd, C}; the engine
+	// matches Cmd+C and the X release is dropped.
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyX, Action: KeyRelease,
+		Timestamp: now.Add(30 * time.Millisecond), Device: "kbd",
+	}))
+
+	cmds := mock.GetCommands()
+	foundXRelease := false
+	for _, cmd := range cmds {
+		if cmd.Key == golibevdev.KeyX && cmd.Action == KeyRelease {
+			foundXRelease = true
+			break
+		}
+	}
+	assert.True(t, foundXRelease,
+		"release of passthrough X must reach the OS even when remaining keys would re-match; got %+v", cmds)
+}
+
+// TestMachine_FlushedModifierReleaseForwardsToOS verifies that releasing a
+// Flushed modifier forwards the release to OS and cleans up tracking state.
+func TestMachine_FlushedModifierReleaseForwardsToOS(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyC},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyC},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyPress, Timestamp: now, Device: "kbd",
+	}))
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyX, Action: KeyPress,
+		Timestamp: now.Add(10 * time.Millisecond), Device: "kbd",
+	}))
+
+	machine.mu.RLock()
+	state, exists := machine.modifierStates[golibevdev.KeyLeftMeta]
+	machine.mu.RUnlock()
+	require.True(t, exists, "Cmd should be tracked")
+	require.Equal(t, ModifierStateFlushed, state, "press of unmapped X should flush Cmd")
+
+	mock.Clear()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyRelease,
+		Timestamp: now.Add(20 * time.Millisecond), Device: "kbd",
+	}))
+
+	cmds := mock.GetCommands()
+	require.Contains(t, cmds, OutputCommand{Key: golibevdev.KeyLeftMeta, Action: KeyRelease},
+		"flushed Cmd release must be forwarded to OS; got %+v", cmds)
+
+	machine.mu.RLock()
+	_, modStillSet := machine.modifierStates[golibevdev.KeyLeftMeta]
+	_, ptStillSet := machine.passthroughPressed[golibevdev.KeyLeftMeta]
+	machine.mu.RUnlock()
+	assert.False(t, modStillSet, "modifierStates entry for Cmd should be deleted")
+	assert.False(t, ptStillSet, "passthroughPressed entry for Cmd should be deleted")
+}
+
+// TestMachine_IndependentModifierReleasesOnOS covers the path where a
+// modifier is not used in any rule (so SSM classifies it Independent), is
+// passthrough-pressed, and must get its release forwarded.
+func TestMachine_IndependentModifierReleasesOnOS(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyC},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyC},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyRightAlt, Action: KeyPress, Timestamp: now, Device: "kbd",
+	}))
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyRightAlt, Action: KeyRelease,
+		Timestamp: now.Add(10 * time.Millisecond), Device: "kbd",
+	}))
+
+	cmds := mock.GetCommands()
+	require.Contains(t, cmds, OutputCommand{Key: golibevdev.KeyRightAlt, Action: KeyPress})
+	require.Contains(t, cmds, OutputCommand{Key: golibevdev.KeyRightAlt, Action: KeyRelease})
+}
+
+// TestMachine_AbsorbedModifierReleaseStillTaps verifies that the
+// "modifier-tap" semantic (pressing a mapped modifier alone and releasing
+// it produces a press+release pair on OS, e.g. Wayland Meta → Activities)
+// survives the release-path refactor.
+func TestMachine_AbsorbedModifierReleaseStillTaps(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyC},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyC},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyPress, Timestamp: now, Device: "kbd",
+	}))
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyRelease,
+		Timestamp: now.Add(10 * time.Millisecond), Device: "kbd",
+	}))
+
+	assert.Equal(t,
+		[]OutputCommand{
+			{Key: golibevdev.KeyLeftMeta, Action: KeyPress},
+			{Key: golibevdev.KeyLeftMeta, Action: KeyRelease},
+		},
+		mock.GetCommands(),
+		"absorbed modifier should tap on solo release",
+	)
+}
+
+// TestMachine_ReleaseDoesNotTriggerNewMapping locks in the design choice
+// of disabling mapping match on release events. With both Cmd+Shift+Z and
+// Cmd+Z configured, releasing Shift mid-Cmd+Shift+Z must NOT fire Cmd+Z.
+func TestMachine_ReleaseDoesNotTriggerNewMapping(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input: []keys.Key{
+			golibevdev.KeyLeftMeta,
+			golibevdev.KeyLeftShift,
+			golibevdev.KeyZ,
+		},
+		Output: []keys.Key{
+			golibevdev.KeyLeftCtrl,
+			golibevdev.KeyLeftShift,
+			golibevdev.KeyZ,
+		},
+	})
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyZ},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyZ},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyPress, Timestamp: now, Device: "kbd",
+	}))
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftShift, Action: KeyPress,
+		Timestamp: now.Add(10 * time.Millisecond), Device: "kbd",
+	}))
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyZ, Action: KeyPress,
+		Timestamp: now.Add(20 * time.Millisecond), Device: "kbd",
+	}))
+
+	mock.Clear()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftShift, Action: KeyRelease,
+		Timestamp: now.Add(30 * time.Millisecond), Device: "kbd",
+	}))
+
+	cmds := mock.GetCommands()
+	for _, cmd := range cmds {
+		if cmd.Action == KeyPress {
+			t.Errorf("no KeyPress should be emitted after release Shift, got %+v in %+v", cmd, cmds)
+		}
+	}
+}
+
+// TestMachine_NoSpuriousFlushAfterPassthroughRelease checks the modifier-
+// state cleanup side-effect of the fix: after the stuck-key sequence runs
+// and is properly cleaned up, a fresh non-modifier press must not trigger
+// a phantom modifier flush from a stale Absorbed entry.
+func TestMachine_NoSpuriousFlushAfterPassthroughRelease(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyC},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyC},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	for i, ev := range []KeyEvent{
+		{Key: golibevdev.KeyLeftMeta, Action: KeyPress},
+		{Key: golibevdev.KeyX, Action: KeyPress},
+		{Key: golibevdev.KeyC, Action: KeyPress},
+		{Key: golibevdev.KeyX, Action: KeyRelease},
+		{Key: golibevdev.KeyC, Action: KeyRelease},
+		{Key: golibevdev.KeyLeftMeta, Action: KeyRelease},
+	} {
+		ev.Timestamp = now.Add(time.Duration(10*(i+1)) * time.Millisecond)
+		ev.Device = "kbd"
+		require.NoError(t, machine.ProcessEventSync(ev))
+	}
+
+	machine.mu.RLock()
+	leftover := len(machine.modifierStates)
+	machine.mu.RUnlock()
+	require.Zero(t, leftover, "modifierStates should be empty after sequence")
+
+	mock.Clear()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyY, Action: KeyPress,
+		Timestamp: now.Add(100 * time.Millisecond), Device: "kbd",
+	}))
+
+	assert.Equal(t,
+		[]OutputCommand{{Key: golibevdev.KeyY, Action: KeyPress}},
+		mock.GetCommands(),
+		"press Y after sequence should emit only Y press, not a phantom modifier",
+	)
+}
+
+// TestMachine_RepeatedSameMappingDoesNotAccumulateBindings exercises the
+// HasMatchingActiveBinding fast path. Repeating the same combo (e.g. via
+// autorepeat past the debounce threshold) must not accumulate active
+// bindings.
+func TestMachine_RepeatedSameMappingDoesNotAccumulateBindings(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+	engine.AddMapping(MappingRule{
+		Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyC},
+		Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyC},
+	})
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	now := time.Now()
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyLeftMeta, Action: KeyPress, Timestamp: now, Device: "kbd",
+	}))
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyC, Action: KeyPress,
+		Timestamp: now.Add(10 * time.Millisecond), Device: "kbd",
+	}))
+
+	require.Len(t, machine.binder.GetActiveBindings(), 1,
+		"first Cmd+C press should create exactly one active binding")
+
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, machine.ProcessEventSync(KeyEvent{
+			Key: golibevdev.KeyC, Action: KeyPress,
+			Timestamp: now.Add(time.Duration(20+i*10) * time.Millisecond),
+			Device:    "kbd",
+		}))
+		assert.Len(t, machine.binder.GetActiveBindings(), 1,
+			"iteration %d: active binding count should remain 1", i)
+	}
+
+	require.NoError(t, machine.ProcessEventSync(KeyEvent{
+		Key: golibevdev.KeyC, Action: KeyRelease,
+		Timestamp: now.Add(200 * time.Millisecond), Device: "kbd",
+	}))
+	assert.Empty(t, machine.binder.GetActiveBindings(),
+		"release C should clean up all active bindings")
+}
+
+// TestMachine_ConcurrentDevicesNoRace exercises eventMu serialization.
+// With -race enabled, this would have flagged interleaved access to
+// ism/osm/modifierStates without the lock. Functionally we just check
+// that emitted press/release pairs balance.
+func TestMachine_ConcurrentDevicesNoRace(t *testing.T) {
+	mock := &MockOutputDevice{}
+	engine := NewSimpleMappingEngine()
+
+	machine := NewMachine(engine, mock, DefaultConfig())
+	require.NoError(t, machine.Start(context.Background()))
+	defer machine.Stop()
+
+	const iterations = 50
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			ts := time.Now()
+			_ = machine.ProcessEvent(KeyEvent{
+				Key: golibevdev.KeyA, Action: KeyPress, Timestamp: ts, Device: "kbd-A",
+			})
+			_ = machine.ProcessEvent(KeyEvent{
+				Key: golibevdev.KeyA, Action: KeyRelease,
+				Timestamp: ts.Add(time.Millisecond), Device: "kbd-A",
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			ts := time.Now()
+			_ = machine.ProcessEvent(KeyEvent{
+				Key: golibevdev.KeyB, Action: KeyPress, Timestamp: ts, Device: "kbd-B",
+			})
+			_ = machine.ProcessEvent(KeyEvent{
+				Key: golibevdev.KeyB, Action: KeyRelease,
+				Timestamp: ts.Add(time.Millisecond), Device: "kbd-B",
+			})
+		}
+	}()
+	wg.Wait()
+
+	pressA, releaseA := 0, 0
+	pressB, releaseB := 0, 0
+	for _, cmd := range mock.GetCommands() {
+		switch {
+		case cmd.Key == golibevdev.KeyA && cmd.Action == KeyPress:
+			pressA++
+		case cmd.Key == golibevdev.KeyA && cmd.Action == KeyRelease:
+			releaseA++
+		case cmd.Key == golibevdev.KeyB && cmd.Action == KeyPress:
+			pressB++
+		case cmd.Key == golibevdev.KeyB && cmd.Action == KeyRelease:
+			releaseB++
+		}
+	}
+	assert.Equal(t, pressA, releaseA, "KeyA press/release counts: %d vs %d", pressA, releaseA)
+	assert.Equal(t, pressB, releaseB, "KeyB press/release counts: %d vs %d", pressB, releaseB)
 }
