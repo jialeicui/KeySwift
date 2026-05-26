@@ -1,7 +1,7 @@
 [
   {"type": "var", "name": "jetbrains", "value": ["jetbrains-goland", "jetbrains-pycharm", "jetbrains-idea"]},
-  {"type": "var", "name": "terminals", "value": ["kitty", "Gnome-terminal", "org.gnome.Terminal", "com.mitchellh.ghostty"]},
-  {"type": "var", "name": "vimMode", "value": ["Cursor", "$jetbrains"]},
+  {"type": "var", "name": "terminals", "value": ["kitty", "Gnome-terminal", "org.gnome.Terminal", "com.mitchellh.ghostty", "dev.warp.Warp"]},
+  {"type": "var", "name": "vimMode", "value": ["Cursor", "$jetbrains", "code"]},
   {"type": "var", "name": "chrome", "value": ["google-chrome", "Google-chrome"]},
 
   {"type": "map", "input": ["cmd", "c"], "output": ["ctrl", "c"], "when": {"notWindow": "$terminals"}},
