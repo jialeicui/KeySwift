@@ -16,6 +16,7 @@ import (
 const (
 	initialReconnectDelay = 500 * time.Millisecond
 	maxReconnectDelay     = 5 * time.Second
+	maxSyncRecoveryEvents = 512
 )
 
 // HandlerWithStateMachine manages input devices and processes events through the state machine.
@@ -179,7 +180,7 @@ func (h *HandlerWithStateMachine) processDeviceEvents(dev *handlerDevice) error 
 			return fmt.Errorf("device handle is not available")
 		}
 
-		ev, err := input.NextEvent(golibevdev.ReadFlagNormal)
+		ev, status, err := input.NextEventWithStatus(golibevdev.ReadFlagNormal)
 		if err != nil {
 			select {
 			case <-h.ctx.Done():
@@ -188,29 +189,128 @@ func (h *HandlerWithStateMachine) processDeviceEvents(dev *handlerDevice) error 
 			}
 			return err
 		}
-
-		if ev.Type == golibevdev.EvSyn || ev.Type != golibevdev.EvKey {
+		if status == golibevdev.ReadStatusSync {
+			h.recoverDroppedInputEvents(dev, input, "read-status-sync")
 			continue
 		}
 
-		keyCode := ev.Code.(golibevdev.KeyEventCode)
-		pressed := ev.Value == 1
-		released := ev.Value == 0
-
-		if !pressed && !released {
-			slog.Debug("Skipping key event with value", "value", ev.Value)
-			continue
-		}
-
-		slog.Debug("Received key event", "key", keyCode, "pressed", pressed, "device", dev.name)
-
-		if err := h.stateMachine.ProcessEvent(dev.id, keyCode, pressed); err != nil {
-			slog.Error("Failed to process event through state machine",
-				"device", dev.name,
-				"key", keyCode,
-				"error", err)
+		switch classifyInputEvent(ev) {
+		case inputEventSyncRecovery:
+			h.recoverDroppedInputEvents(dev, input, "syn-dropped")
+		case inputEventForward:
+			h.forwardInputEvent(dev, ev)
+		default:
+			h.processKeyEvent(dev, ev)
 		}
 	}
+}
+
+// inputEventDispatch describes how the event loop routes a raw input event.
+type inputEventDispatch int
+
+const (
+	inputEventStateMachine inputEventDispatch = iota
+	inputEventForward
+	inputEventSyncRecovery
+)
+
+// classifyInputEvent decides how a successfully read input event is routed.
+// Key events go through the state machine, SYN_DROPPED triggers sync
+// recovery, and everything else (pointer motion, SYN_REPORT frame markers,
+// etc.) is forwarded to the virtual output device so that an accidentally
+// grabbed device with pointer capabilities keeps working.
+func classifyInputEvent(ev golibevdev.Event) inputEventDispatch {
+	if ev.Type == golibevdev.EvSyn {
+		if ev.Code == golibevdev.SynDropped {
+			return inputEventSyncRecovery
+		}
+		return inputEventForward
+	}
+	if ev.Type != golibevdev.EvKey {
+		return inputEventForward
+	}
+	return inputEventStateMachine
+}
+
+func (h *HandlerWithStateMachine) forwardInputEvent(dev *handlerDevice, ev golibevdev.Event) {
+	if h.out == nil {
+		return
+	}
+	if err := h.out.ForwardEvent(ev); err != nil {
+		slog.Error("Failed to forward input event",
+			"device", dev.name,
+			"type", ev.Type,
+			"code", ev.Code,
+			"value", ev.Value,
+			"error", err)
+	}
+}
+
+func (h *HandlerWithStateMachine) processKeyEvent(dev *handlerDevice, ev golibevdev.Event) {
+	keyCode := ev.Code.(golibevdev.KeyEventCode)
+	pressed := ev.Value == 1
+	released := ev.Value == 0
+
+	if !pressed && !released {
+		slog.Debug("Skipping key event with value", "value", ev.Value)
+		return
+	}
+
+	slog.Debug("Received key event", "key", keyCode, "pressed", pressed, "device", dev.name)
+
+	if err := h.stateMachine.ProcessEvent(dev.id, keyCode, pressed); err != nil {
+		slog.Error("Failed to process event through state machine",
+			"device", dev.name,
+			"key", keyCode,
+			"error", err)
+	}
+}
+
+func (h *HandlerWithStateMachine) recoverDroppedInputEvents(dev *handlerDevice, input *golibevdev.InputDev, reason string) {
+	if h.stateMachine == nil {
+		return
+	}
+
+	slog.Warn("Input event stream desynchronized, releasing tracked keys before recovery",
+		"device", dev.name,
+		"path", dev.currentPath(),
+		"reason", reason)
+
+	if err := h.stateMachine.HandleDeviceLost(dev.id); err != nil {
+		slog.Error("Failed to release state during input sync recovery",
+			"device", dev.name,
+			"error", err)
+		return
+	}
+
+	recoveredEvents := 0
+	for recoveredEvents < maxSyncRecoveryEvents {
+		_, _, err := input.NextEventWithStatus(golibevdev.ReadFlagSync)
+		if err != nil {
+			break
+		}
+		recoveredEvents++
+
+		// Sync-mode events are libevdev's state-reconciliation diff, not a
+		// normal input stream. We have already released KeySwift's tracked
+		// state above, so replaying this diff as fresh user input can create
+		// new unmatched presses. Drain it only and resume from future normal
+		// events.
+	}
+
+	if recoveredEvents == 0 {
+		return
+	}
+
+	if recoveredEvents == maxSyncRecoveryEvents {
+		slog.Warn("Input sync recovery hit event limit",
+			"device", dev.name,
+			"limit", maxSyncRecoveryEvents)
+	}
+
+	slog.Info("Input event stream recovered",
+		"device", dev.name,
+		"events", recoveredEvents)
 }
 
 func (h *HandlerWithStateMachine) waitForReconnect(dev *handlerDevice) error {
@@ -247,8 +347,21 @@ func (h *HandlerWithStateMachine) tryReconnect(dev *handlerDevice) error {
 	if currentPath != "" {
 		input, err := openGrabbedInputDevice(currentPath)
 		if err == nil {
-			dev.setConnection(currentPath, input)
-			return nil
+			if isSameInputDevice(dev.name, input.Name()) {
+				dev.setConnection(currentPath, input)
+				return nil
+			}
+
+			// /dev/input/eventN nodes are reused by the kernel. The path may
+			// now belong to a different device (e.g. a mouse that took over
+			// the event node released by a disconnected keyboard), so grab
+			// it only after the name check above and otherwise fall back to
+			// rescanning by name below.
+			slog.Warn("Device path now belongs to a different device, rescanning by name",
+				"device", dev.name,
+				"path", currentPath,
+				"actual", input.Name())
+			input.Close()
 		}
 	}
 
@@ -328,6 +441,12 @@ func (h *HandlerWithStateMachine) EmergencyRelease() {
 	if h.stateMachine != nil {
 		h.stateMachine.EmergencyRelease()
 	}
+}
+
+// isSameInputDevice reports whether a reopened device still is the one we
+// originally grabbed, identified by its evdev name.
+func isSameInputDevice(expected, actual string) bool {
+	return expected == actual
 }
 
 func openGrabbedInputDevice(path string) (*golibevdev.InputDev, error) {

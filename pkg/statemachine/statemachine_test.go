@@ -16,10 +16,16 @@ import (
 // MockOutputDevice is a mock implementation of OutputDevice for testing
 type MockOutputDevice struct {
 	commands []OutputCommand
+	events   []golibevdev.Event
 }
 
 func (m *MockOutputDevice) Execute(cmd OutputCommand) error {
 	m.commands = append(m.commands, cmd)
+	return nil
+}
+
+func (m *MockOutputDevice) ForwardEvent(ev golibevdev.Event) error {
+	m.events = append(m.events, ev)
 	return nil
 }
 
@@ -53,6 +59,10 @@ func (r *ResettingOutputDevice) Execute(cmd OutputCommand) error {
 	return nil
 }
 
+func (r *ResettingOutputDevice) ForwardEvent(ev golibevdev.Event) error {
+	return nil
+}
+
 func (r *ResettingOutputDevice) Sync() error {
 	return nil
 }
@@ -63,6 +73,7 @@ func (r *ResettingOutputDevice) Close() error {
 
 type fakeLowLevelOutput struct {
 	writes   []OutputCommand
+	events   []golibevdev.Event
 	failNext error
 	closed   bool
 }
@@ -79,6 +90,16 @@ func (f *fakeLowLevelOutput) WriteKey(key KeyCode, value int32) error {
 		action = KeyPress
 	}
 	f.writes = append(f.writes, OutputCommand{Key: key, Action: action})
+	return nil
+}
+
+func (f *fakeLowLevelOutput) WriteEvent(typ golibevdev.EventType, code golibevdev.EventCode, value int32) error {
+	if f.failNext != nil {
+		err := f.failNext
+		f.failNext = nil
+		return err
+	}
+	f.events = append(f.events, golibevdev.Event{Type: typ, Code: code, Value: value})
 	return nil
 }
 
@@ -641,6 +662,47 @@ func TestRecoveringOutputDeviceRebuildsAfterFailure(t *testing.T) {
 
 	require.NoError(t, device.Execute(OutputCommand{Key: golibevdev.KeyA, Action: KeyRelease}))
 	assert.Contains(t, second.writes, OutputCommand{Key: golibevdev.KeyA, Action: KeyRelease})
+	require.NoError(t, device.Close())
+}
+
+func TestRecoveringOutputDeviceForwardsEvents(t *testing.T) {
+	low := &fakeLowLevelOutput{}
+	device, err := newRecoveringOutputDevice("keyswift-test", func(name string) (lowLevelOutputDevice, error) {
+		return low, nil
+	})
+	require.NoError(t, err)
+
+	ev := golibevdev.Event{Type: golibevdev.EvRel, Code: golibevdev.RelX, Value: -3}
+	require.NoError(t, device.ForwardEvent(ev))
+	require.Len(t, low.events, 1)
+	assert.Equal(t, ev.Type, low.events[0].Type)
+	assert.Equal(t, ev.Code, low.events[0].Code)
+	assert.Equal(t, ev.Value, low.events[0].Value)
+	require.NoError(t, device.Close())
+}
+
+func TestRecoveringOutputDeviceRebuildsAfterForwardFailure(t *testing.T) {
+	first := &fakeLowLevelOutput{failNext: errors.New("write failed")}
+	second := &fakeLowLevelOutput{}
+	callCount := 0
+
+	device, err := newRecoveringOutputDevice("keyswift-test", func(name string) (lowLevelOutputDevice, error) {
+		callCount++
+		if callCount == 1 {
+			return first, nil
+		}
+		return second, nil
+	})
+	require.NoError(t, err)
+
+	err = device.ForwardEvent(golibevdev.Event{Type: golibevdev.EvRel, Code: golibevdev.RelY, Value: 1})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrOutputResetRequired)
+	assert.True(t, first.closed)
+
+	require.NoError(t, device.ForwardEvent(golibevdev.Event{Type: golibevdev.EvRel, Code: golibevdev.RelY, Value: 2}))
+	require.Len(t, second.events, 1)
+	assert.Equal(t, int32(2), second.events[0].Value)
 	require.NoError(t, device.Close())
 }
 

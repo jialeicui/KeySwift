@@ -2,12 +2,17 @@ package statemachine
 
 import (
 	"context"
+
+	"github.com/jialeicui/golibevdev"
 )
 
 // OutputDevice abstracts the virtual output device
 type OutputDevice interface {
 	// Execute sends a command to the output device
 	Execute(cmd OutputCommand) error
+	// ForwardEvent forwards a raw input event (e.g. pointer motion) to the
+	// output device unchanged
+	ForwardEvent(ev golibevdev.Event) error
 	// Sync synchronizes the device state
 	Sync() error
 	// Close releases the underlying output device

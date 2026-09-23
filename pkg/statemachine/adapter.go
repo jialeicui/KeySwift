@@ -16,35 +16,15 @@ var ErrOutputResetRequired = errors.New("output device reset required")
 
 type lowLevelOutputDevice interface {
 	WriteKey(key KeyCode, value int32) error
+	WriteEvent(typ golibevdev.EventType, code golibevdev.EventCode, value int32) error
 	Sync() error
 	Close() error
 }
 
 type outputDeviceFactory func(name string) (lowLevelOutputDevice, error)
 
-type uinputLowLevelDevice struct {
-	device *golibevdev.UInputDev
-}
-
-func (d *uinputLowLevelDevice) WriteKey(key KeyCode, value int32) error {
-	return d.device.WriteEvent(golibevdev.EvKey, key, value)
-}
-
-func (d *uinputLowLevelDevice) Sync() error {
-	return d.device.WriteEvent(golibevdev.EvSyn, golibevdev.SynReport, 0)
-}
-
-func (d *uinputLowLevelDevice) Close() error {
-	d.device.Close()
-	return nil
-}
-
 func newDefaultOutputDeviceFactory(name string) (lowLevelOutputDevice, error) {
-	device, err := golibevdev.NewVirtualKeyboard(name)
-	if err != nil {
-		return nil, err
-	}
-	return &uinputLowLevelDevice{device: device}, nil
+	return newUinputLowLevelDevice(name)
 }
 
 // RecoveringOutputDevice rebuilds the virtual keyboard after write failures.
@@ -92,6 +72,22 @@ func (d *RecoveringOutputDevice) Execute(cmd OutputCommand) error {
 	}
 	if err := d.device.Sync(); err != nil {
 		return d.recoverLocked(fmt.Errorf("write sync event: %w", err))
+	}
+
+	return nil
+}
+
+// ForwardEvent implements OutputDevice.
+func (d *RecoveringOutputDevice) ForwardEvent(ev golibevdev.Event) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.device == nil {
+		return d.recoverLocked(fmt.Errorf("output device is not available"))
+	}
+
+	if err := d.device.WriteEvent(ev.Type, ev.Code, ev.Value); err != nil {
+		return d.recoverLocked(fmt.Errorf("forward input event: %w", err))
 	}
 
 	return nil
@@ -283,6 +279,12 @@ func (d *LoggingOutputDevice) Execute(cmd OutputCommand) error {
 	}
 	d.logger.Debug("Output command", "key", cmd.Key, "action", action)
 	return d.wrapped.Execute(cmd)
+}
+
+// ForwardEvent implements OutputDevice with logging
+func (d *LoggingOutputDevice) ForwardEvent(ev golibevdev.Event) error {
+	d.logger.Debug("Forward input event", "type", ev.Type, "code", ev.Code, "value", ev.Value)
+	return d.wrapped.ForwardEvent(ev)
 }
 
 // Sync implements OutputDevice with logging
