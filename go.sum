@@ -3,8 +3,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/godbus/dbus/v5 v5.1.0 h1:4KLkAxT3aOY8Li4FRJe/KvhoNFFxo0m6fNuFUO8QJUk=
 github.com/godbus/dbus/v5 v5.1.0/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
-github.com/jialeicui/golibevdev v0.0.2 h1:CQij28fpHE0Cd4tMH4udkiFWloxwSA2Z+Z67Gj146iY=
-github.com/jialeicui/golibevdev v0.0.2/go.mod h1:BIGi9TtzkWS9wHy3n+uGXeSfhiPWJUOVCvgg/Qh8tX8=
+github.com/jialeicui/golibevdev v0.0.4 h1:DpXc06+FvVS5CCWAO75HlzIsugNxm2htERlTZGIKDIg=
+github.com/jialeicui/golibevdev v0.0.4/go.mod h1:BIGi9TtzkWS9wHy3n+uGXeSfhiPWJUOVCvgg/Qh8tX8=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=

@@ -16,6 +16,7 @@ import (
 const (
 	initialReconnectDelay = 500 * time.Millisecond
 	maxReconnectDelay     = 5 * time.Second
+	maxSyncRecoveryEvents = 512
 )
 
 // HandlerWithStateMachine manages input devices and processes events through the state machine.
@@ -179,7 +180,7 @@ func (h *HandlerWithStateMachine) processDeviceEvents(dev *handlerDevice) error 
 			return fmt.Errorf("device handle is not available")
 		}
 
-		ev, err := input.NextEvent(golibevdev.ReadFlagNormal)
+		ev, status, err := input.NextEventWithStatus(golibevdev.ReadFlagNormal)
 		if err != nil {
 			select {
 			case <-h.ctx.Done():
@@ -188,29 +189,90 @@ func (h *HandlerWithStateMachine) processDeviceEvents(dev *handlerDevice) error 
 			}
 			return err
 		}
-
-		if ev.Type == golibevdev.EvSyn || ev.Type != golibevdev.EvKey {
+		if status == golibevdev.ReadStatusSync {
+			h.recoverDroppedInputEvents(dev, input, "read-status-sync")
 			continue
 		}
 
-		keyCode := ev.Code.(golibevdev.KeyEventCode)
-		pressed := ev.Value == 1
-		released := ev.Value == 0
-
-		if !pressed && !released {
-			slog.Debug("Skipping key event with value", "value", ev.Value)
+		if ev.Type == golibevdev.EvSyn {
+			if ev.Code == golibevdev.SynDropped {
+				h.recoverDroppedInputEvents(dev, input, "syn-dropped")
+			}
+			continue
+		}
+		if ev.Type != golibevdev.EvKey {
 			continue
 		}
 
-		slog.Debug("Received key event", "key", keyCode, "pressed", pressed, "device", dev.name)
-
-		if err := h.stateMachine.ProcessEvent(dev.id, keyCode, pressed); err != nil {
-			slog.Error("Failed to process event through state machine",
-				"device", dev.name,
-				"key", keyCode,
-				"error", err)
-		}
+		h.processKeyEvent(dev, ev)
 	}
+}
+
+func (h *HandlerWithStateMachine) processKeyEvent(dev *handlerDevice, ev golibevdev.Event) {
+	keyCode := ev.Code.(golibevdev.KeyEventCode)
+	pressed := ev.Value == 1
+	released := ev.Value == 0
+
+	if !pressed && !released {
+		slog.Debug("Skipping key event with value", "value", ev.Value)
+		return
+	}
+
+	slog.Debug("Received key event", "key", keyCode, "pressed", pressed, "device", dev.name)
+
+	if err := h.stateMachine.ProcessEvent(dev.id, keyCode, pressed); err != nil {
+		slog.Error("Failed to process event through state machine",
+			"device", dev.name,
+			"key", keyCode,
+			"error", err)
+	}
+}
+
+func (h *HandlerWithStateMachine) recoverDroppedInputEvents(dev *handlerDevice, input *golibevdev.InputDev, reason string) {
+	if h.stateMachine == nil {
+		return
+	}
+
+	slog.Warn("Input event stream desynchronized, releasing tracked keys before recovery",
+		"device", dev.name,
+		"path", dev.currentPath(),
+		"reason", reason)
+
+	if err := h.stateMachine.HandleDeviceLost(dev.id); err != nil {
+		slog.Error("Failed to release state during input sync recovery",
+			"device", dev.name,
+			"error", err)
+		return
+	}
+
+	recoveredEvents := 0
+	for recoveredEvents < maxSyncRecoveryEvents {
+		_, _, err := input.NextEventWithStatus(golibevdev.ReadFlagSync)
+		if err != nil {
+			break
+		}
+		recoveredEvents++
+
+		// Sync-mode events are libevdev's state-reconciliation diff, not a
+		// normal input stream. We have already released KeySwift's tracked
+		// state above, so replaying this diff as fresh user input can create
+		// new unmatched presses. Drain it only and resume from future normal
+		// events.
+	}
+
+	if recoveredEvents == 0 {
+		return
+	}
+
+	if recoveredEvents == maxSyncRecoveryEvents {
+		slog.Warn("Input sync recovery hit event limit",
+			"device", dev.name,
+			"limit", maxSyncRecoveryEvents)
+	}
+
+	slog.Info("Input event stream recovered",
+		"device", dev.name,
+		"events", recoveredEvents)
 }
 
 func (h *HandlerWithStateMachine) waitForReconnect(dev *handlerDevice) error {
