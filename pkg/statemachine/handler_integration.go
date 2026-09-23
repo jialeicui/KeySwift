@@ -309,8 +309,21 @@ func (h *HandlerWithStateMachine) tryReconnect(dev *handlerDevice) error {
 	if currentPath != "" {
 		input, err := openGrabbedInputDevice(currentPath)
 		if err == nil {
-			dev.setConnection(currentPath, input)
-			return nil
+			if isSameInputDevice(dev.name, input.Name()) {
+				dev.setConnection(currentPath, input)
+				return nil
+			}
+
+			// /dev/input/eventN nodes are reused by the kernel. The path may
+			// now belong to a different device (e.g. a mouse that took over
+			// the event node released by a disconnected keyboard), so grab
+			// it only after the name check above and otherwise fall back to
+			// rescanning by name below.
+			slog.Warn("Device path now belongs to a different device, rescanning by name",
+				"device", dev.name,
+				"path", currentPath,
+				"actual", input.Name())
+			input.Close()
 		}
 	}
 
@@ -390,6 +403,12 @@ func (h *HandlerWithStateMachine) EmergencyRelease() {
 	if h.stateMachine != nil {
 		h.stateMachine.EmergencyRelease()
 	}
+}
+
+// isSameInputDevice reports whether a reopened device still is the one we
+// originally grabbed, identified by its evdev name.
+func isSameInputDevice(expected, actual string) bool {
+	return expected == actual
 }
 
 func openGrabbedInputDevice(path string) (*golibevdev.InputDev, error) {
