@@ -194,17 +194,55 @@ func (h *HandlerWithStateMachine) processDeviceEvents(dev *handlerDevice) error 
 			continue
 		}
 
-		if ev.Type == golibevdev.EvSyn {
-			if ev.Code == golibevdev.SynDropped {
-				h.recoverDroppedInputEvents(dev, input, "syn-dropped")
-			}
-			continue
+		switch classifyInputEvent(ev) {
+		case inputEventSyncRecovery:
+			h.recoverDroppedInputEvents(dev, input, "syn-dropped")
+		case inputEventForward:
+			h.forwardInputEvent(dev, ev)
+		default:
+			h.processKeyEvent(dev, ev)
 		}
-		if ev.Type != golibevdev.EvKey {
-			continue
-		}
+	}
+}
 
-		h.processKeyEvent(dev, ev)
+// inputEventDispatch describes how the event loop routes a raw input event.
+type inputEventDispatch int
+
+const (
+	inputEventStateMachine inputEventDispatch = iota
+	inputEventForward
+	inputEventSyncRecovery
+)
+
+// classifyInputEvent decides how a successfully read input event is routed.
+// Key events go through the state machine, SYN_DROPPED triggers sync
+// recovery, and everything else (pointer motion, SYN_REPORT frame markers,
+// etc.) is forwarded to the virtual output device so that an accidentally
+// grabbed device with pointer capabilities keeps working.
+func classifyInputEvent(ev golibevdev.Event) inputEventDispatch {
+	if ev.Type == golibevdev.EvSyn {
+		if ev.Code == golibevdev.SynDropped {
+			return inputEventSyncRecovery
+		}
+		return inputEventForward
+	}
+	if ev.Type != golibevdev.EvKey {
+		return inputEventForward
+	}
+	return inputEventStateMachine
+}
+
+func (h *HandlerWithStateMachine) forwardInputEvent(dev *handlerDevice, ev golibevdev.Event) {
+	if h.out == nil {
+		return
+	}
+	if err := h.out.ForwardEvent(ev); err != nil {
+		slog.Error("Failed to forward input event",
+			"device", dev.name,
+			"type", ev.Type,
+			"code", ev.Code,
+			"value", ev.Value,
+			"error", err)
 	}
 }
 
