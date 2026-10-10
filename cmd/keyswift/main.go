@@ -123,6 +123,19 @@ func main() {
 		handler.Close()
 	}()
 
+	// Shut down when the D-Bus connection is lost (e.g. the session bus is
+	// restarted) so the service manager can restart the process and let it
+	// reconnect to the current session bus.
+	go func() {
+		select {
+		case <-windowMonitor.Disconnected():
+			slog.Error("D-Bus connection lost, shutting down to allow a restart")
+			cancel()
+			handler.Close()
+		case <-ctx.Done():
+		}
+	}()
+
 	// Start processing events
 	slog.Info(fmt.Sprintf("Processing events from %d devices... Press Ctrl+C to exit", len(matchedDevices)))
 	handler.ProcessEvents(out, windowMonitor)

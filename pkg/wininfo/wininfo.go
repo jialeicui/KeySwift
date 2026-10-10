@@ -7,6 +7,10 @@ type WinGetter interface {
 	// The callback function will be called with the new active window information
 	// The function should return an error if it fails to register the callback
 	OnActiveWindowChange(ActiveWindowChangeCallback) error
+	// Disconnected returns a channel that is closed when the underlying
+	// connection to the window information source is lost.
+	// Implementations without a live connection may return a channel that never closes.
+	Disconnected() <-chan struct{}
 	// Close closes the window info service
 	Close()
 }
