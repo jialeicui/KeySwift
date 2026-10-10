@@ -32,8 +32,9 @@ const (
 
 type Receiver struct {
 	*options
-	current *wininfo.WinInfo
-	conn    *dbus.Conn
+	current      *wininfo.WinInfo
+	conn         *dbus.Conn
+	disconnected chan struct{}
 }
 
 func (r *Receiver) UpdateActiveWindow(in string) *dbus.Error {
@@ -157,7 +158,20 @@ func (r *Receiver) setupDBus() error {
 	}
 
 	r.conn = conn
+
+	// conn.Context() is canceled both when the bus drops the connection
+	// (e.g. the session bus is restarted) and on a regular Close().
+	r.disconnected = make(chan struct{})
+	go func() {
+		<-conn.Context().Done()
+		close(r.disconnected)
+	}()
+
 	return nil
+}
+
+func (r *Receiver) Disconnected() <-chan struct{} {
+	return r.disconnected
 }
 
 func (r *Receiver) OnActiveWindowChange(callback wininfo.ActiveWindowChangeCallback) error {
@@ -207,6 +221,12 @@ func (r *DegradedReceiver) Close() {
 
 func (r *DegradedReceiver) OnActiveWindowChange(callback wininfo.ActiveWindowChangeCallback) error {
 	r.options.onChange = callback
+	return nil
+}
+
+// Disconnected returns nil: there is no live connection in degraded mode,
+// so the channel never closes.
+func (r *DegradedReceiver) Disconnected() <-chan struct{} {
 	return nil
 }
 
