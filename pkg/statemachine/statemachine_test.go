@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jialeicui/golibevdev"
+	"github.com/jialeicui/keyswift/pkg/config"
 	"github.com/jialeicui/keyswift/pkg/keys"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1135,4 +1136,52 @@ func TestMachine_ConcurrentDevicesNoRace(t *testing.T) {
 	}
 	assert.Equal(t, pressA, releaseA, "KeyA press/release counts: %d vs %d", pressA, releaseA)
 	assert.Equal(t, pressB, releaseB, "KeyB press/release counts: %d vs %d", pressB, releaseB)
+}
+
+// TestMachine_ChatterFilterPreventsRemap replays the real-world failure:
+// a chattering modifier emits release+press pairs while the combo key is
+// still held, re-triggering the mapping (e.g. double paste on Cmd+V).
+// Events flow through a ChatterFilter wrapping the real config state machine,
+// so the spurious release+press pair is swallowed and the mapping fires once.
+func TestMachine_ChatterFilterPreventsRemap(t *testing.T) {
+	mock := &MockOutputDevice{}
+	cfg := &config.Config{
+		Mappings: []config.MappingRule{{
+			Input:  []keys.Key{golibevdev.KeyLeftMeta, golibevdev.KeyV},
+			Output: []keys.Key{golibevdev.KeyLeftCtrl, golibevdev.KeyLeftShift, golibevdev.KeyV},
+		}},
+	}
+
+	sm := NewConfigStateMachine(mock, cfg, nil, DefaultConfig())
+	ctx := context.Background()
+	require.NoError(t, sm.Start(ctx))
+	defer sm.Stop()
+
+	filter := NewChatterFilter(sm, 80*time.Millisecond,
+		map[KeyCode]bool{golibevdev.KeyLeftMeta: true}, ctx)
+
+	// Cmd down, V down (mapping fires once)
+	require.NoError(t, filter.ProcessEvent("kbd", golibevdev.KeyLeftMeta, true))
+	time.Sleep(60 * time.Millisecond)
+	require.NoError(t, filter.ProcessEvent("kbd", golibevdev.KeyV, true))
+
+	// Chatter: Meta release+re-press ~20ms apart while V is still held
+	require.NoError(t, filter.ProcessEvent("kbd", golibevdev.KeyLeftMeta, false))
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, filter.ProcessEvent("kbd", golibevdev.KeyLeftMeta, true))
+
+	time.Sleep(150 * time.Millisecond) // no deferred release should survive
+
+	// Real releases
+	require.NoError(t, filter.ProcessEvent("kbd", golibevdev.KeyV, false))
+	require.NoError(t, filter.ProcessEvent("kbd", golibevdev.KeyLeftMeta, false))
+	time.Sleep(150 * time.Millisecond) // let the deferred Cmd release fire
+
+	vPresses := 0
+	for _, cmd := range mock.GetCommands() {
+		if cmd.Key == golibevdev.KeyV && cmd.Action == KeyPress {
+			vPresses++
+		}
+	}
+	assert.Equal(t, 1, vPresses, "chatter must not re-trigger the mapping")
 }

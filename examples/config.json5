@@ -4,6 +4,7 @@
 // Configuration is an array of rule objects. Each rule has a "type" field:
 // - type: "var" - Define a variable for reuse
 // - type: "map" - Define a key mapping
+// - type: "settings" - Global behavior settings (e.g. key chatter filter)
 
 [
   // ========== Variables ==========
@@ -39,6 +40,24 @@
     "name": "vimMode",
     "value": ["Cursor", "$jetbrains"]  // Can reference other variables
   },
+  
+  // ========== Settings (optional) ==========
+  // chatterThreshold: filter switch chatter (a worn key emitting spurious
+  // release+press pairs while held, which can re-trigger mappings such as
+  // Cmd+V pasting twice). For the listed keys, a release is deferred by this
+  // duration; if the same key is pressed again within the window, the
+  // release+press pair is swallowed as chatter. Accepts Go duration strings
+  // like "50ms"/"100ms". Omitted or "0" = disabled (the default).
+  // Side effect: real releases of guarded keys take effect up to this
+  // duration later.
+  // chatterKeys: restrict the filter to these keys; omit to filter all keys.
+  // Restricting to a chattering modifier is recommended so fast double-tap
+  // of letter keys is never affected.
+  // {
+  //   "type": "settings",
+  //   "chatterThreshold": "80ms",
+  //   "chatterKeys": ["cmd"]
+  // },
   
   // ========== Key Mappings ==========
   // Each mapping has:

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jialeicui/keyswift/pkg/keys"
 )
@@ -18,6 +19,17 @@ import (
 type Config struct {
 	Vars     map[string][]string `json:"vars"`
 	Mappings []MappingRule       `json:"mappings"`
+	Settings Settings            `json:"settings"`
+}
+
+// Settings holds optional global behavior settings
+type Settings struct {
+	// ChatterThreshold filters out a key press that arrives within this
+	// duration after the same key's release (switch chatter). Zero disables
+	// the filter (the default).
+	ChatterThreshold time.Duration `json:"-"`
+	// ChatterKeys restricts the filter to these keys; empty means all keys.
+	ChatterKeys []keys.Key `json:"-"`
 }
 
 // MappingRule represents a single key mapping
@@ -41,6 +53,10 @@ type RawRule struct {
 	Input  []string       `json:"input,omitempty"`
 	Output []string       `json:"output,omitempty"`
 	When   *WhenCondition `json:"when,omitempty"`
+
+	// Settings rule fields (type: "settings")
+	ChatterThreshold string   `json:"chatterThreshold,omitempty"`
+	ChatterKeys      []string `json:"chatterKeys,omitempty"`
 }
 
 // LoadConfig loads and parses the configuration file
@@ -84,7 +100,40 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Mappings = append(cfg.Mappings, *mapping)
 	}
 
+	// Third pass: process settings
+	for i, rule := range rawRules {
+		if rule.Type != "settings" {
+			continue
+		}
+		if err := cfg.processSettingsRule(rule); err != nil {
+			return nil, fmt.Errorf("failed to process settings %d: %w", i, err)
+		}
+	}
+
 	return cfg, nil
+}
+
+func (cfg *Config) processSettingsRule(rule RawRule) error {
+	if rule.ChatterThreshold != "" {
+		threshold, err := time.ParseDuration(rule.ChatterThreshold)
+		if err != nil {
+			return fmt.Errorf("invalid chatterThreshold %q: %w", rule.ChatterThreshold, err)
+		}
+		if threshold < 0 {
+			return fmt.Errorf("chatterThreshold must not be negative")
+		}
+		cfg.Settings.ChatterThreshold = threshold
+	}
+
+	if len(rule.ChatterKeys) > 0 {
+		chatterKeys, err := cfg.resolveKeys(rule.ChatterKeys)
+		if err != nil {
+			return fmt.Errorf("invalid chatterKeys: %w", err)
+		}
+		cfg.Settings.ChatterKeys = chatterKeys
+	}
+
+	return nil
 }
 
 func (cfg *Config) processMappingRule(rule RawRule) (*MappingRule, error) {

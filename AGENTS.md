@@ -137,6 +137,9 @@ The configuration file (`~/.config/keyswift/config.json`) is a JSON array of rul
 - **`map`**: Maps an input key combo to an output combo, with optional `when` condition
   - `when.window`: apply only when active window class matches
   - `when.notWindow`: apply only when active window class does **not** match
+- **`settings`**: Optional global settings
+  - `chatterThreshold`: switch-chatter filter — defer releases of guarded keys by this duration; a same-key press within the window swallows the release+press pair (e.g. `"80ms"`; omitted/`"0"` = disabled)
+  - `chatterKeys`: restrict the filter to these keys; omit for all keys
 
 ### Example Configuration
 

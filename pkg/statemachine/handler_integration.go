@@ -27,8 +27,9 @@ type HandlerWithStateMachine struct {
 	out       OutputDevice
 	closeOnce sync.Once
 
-	stateMachine *ConfigStateMachine
-	overview     evdev.Overview
+	stateMachine   *ConfigStateMachine
+	eventProcessor KeyEventProcessor
+	overview       evdev.Overview
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -107,6 +108,18 @@ func (h *HandlerWithStateMachine) ProcessEvents(output OutputDevice, windowMonit
 		DefaultConfig(),
 	)
 
+	h.eventProcessor = h.stateMachine
+	if h.cfg.Settings.ChatterThreshold > 0 {
+		chatterKeys := make(map[KeyCode]bool, len(h.cfg.Settings.ChatterKeys))
+		for _, key := range h.cfg.Settings.ChatterKeys {
+			chatterKeys[key] = true
+		}
+		h.eventProcessor = NewChatterFilter(h.stateMachine, h.cfg.Settings.ChatterThreshold, chatterKeys, h.ctx)
+		slog.Info("Key chatter filter enabled",
+			"threshold", h.cfg.Settings.ChatterThreshold,
+			"keys", h.cfg.Settings.ChatterKeys)
+	}
+
 	if err := h.stateMachine.Start(h.ctx); err != nil {
 		slog.Error("Failed to start state machine", "error", err)
 		return
@@ -150,6 +163,9 @@ func (h *HandlerWithStateMachine) deviceSupervisor(dev *handlerDevice) {
 		if h.stateMachine != nil {
 			if releaseErr := h.stateMachine.HandleDeviceLost(dev.id); releaseErr != nil {
 				slog.Error("Failed to release lost device state", "device", dev.name, "error", releaseErr)
+			}
+			if filter, ok := h.eventProcessor.(*ChatterFilter); ok {
+				filter.HandleDeviceLost()
 			}
 		}
 
@@ -256,9 +272,9 @@ func (h *HandlerWithStateMachine) processKeyEvent(dev *handlerDevice, ev golibev
 		return
 	}
 
-	slog.Debug("Received key event", "key", keyCode, "pressed", pressed, "device", dev.name)
+	slog.Debug("Received key event", "key", keyCode, "pressed", pressed, "device", dev.id, "deviceName", dev.name)
 
-	if err := h.stateMachine.ProcessEvent(dev.id, keyCode, pressed); err != nil {
+	if err := h.eventProcessor.ProcessEvent(dev.id, keyCode, pressed); err != nil {
 		slog.Error("Failed to process event through state machine",
 			"device", dev.name,
 			"key", keyCode,
@@ -281,6 +297,9 @@ func (h *HandlerWithStateMachine) recoverDroppedInputEvents(dev *handlerDevice, 
 			"device", dev.name,
 			"error", err)
 		return
+	}
+	if filter, ok := h.eventProcessor.(*ChatterFilter); ok {
+		filter.HandleDeviceLost()
 	}
 
 	recoveredEvents := 0

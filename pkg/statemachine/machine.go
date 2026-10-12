@@ -299,6 +299,7 @@ func (m *Machine) handleEvent(event KeyEvent) error {
 	inputState, changed := m.ism.ProcessEvent(event)
 	slog.Debug("ISM ProcessEvent result", "changed", changed, "keyStates", len(inputState.KeyStates), "eventSeqLen", len(inputState.EventSeq))
 	if !changed {
+		slog.Debug("Input event ignored (debounced duplicate or no state change)", "key", event.Key, "action", event.Action, "device", event.Device)
 		return nil
 	}
 

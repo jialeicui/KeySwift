@@ -4,6 +4,8 @@
   {"type": "var", "name": "vimMode", "value": ["Cursor", "$jetbrains", "code"]},
   {"type": "var", "name": "chrome", "value": ["google-chrome", "Google-chrome"]},
 
+  {"type": "settings", "chatterThreshold": "80ms", "chatterKeys": ["cmd"]},
+
   {"type": "map", "input": ["cmd", "c"], "output": ["ctrl", "c"], "when": {"notWindow": "$terminals"}},
   {"type": "map", "input": ["cmd", "c"], "output": ["ctrl", "shift", "c"], "when": {"window": "$terminals"}},
 

@@ -79,6 +79,22 @@ Fields:
 
 Both accept a single string or an array of strings. Variable references (`$varname`) are supported.
 
+### Global Settings (`type: "settings"`)
+
+Optional global behavior settings:
+
+```json
+{
+  "type": "settings",
+  "chatterThreshold": "80ms",
+  "chatterKeys": ["cmd"]
+}
+```
+
+Fields:
+- `chatterThreshold` (optional): Filter **switch chatter** — a worn key emitting spurious release+press pairs while held, which otherwise re-triggers mappings (e.g. Cmd+V pasting twice). For guarded keys, a release is deferred by this duration; if the same key is pressed again within the window, the release+press pair is swallowed as chatter. Accepts Go duration strings (`"50ms"`, `"100ms"`). Omitted or `"0"` means disabled (the default). Side effect: real releases of guarded keys take effect up to this duration later.
+- `chatterKeys` (optional): Restrict the chatter filter to these keys. Omit to apply it to all keys. Restricting it to the chattering key is recommended, so fast legitimate double-taps of other keys are never affected.
+
 ## Key Names
 
 Key names are case-insensitive. Common names:
