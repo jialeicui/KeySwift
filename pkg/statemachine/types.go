@@ -218,6 +218,10 @@ type Config struct {
 	Semantic    SemanticConfig
 	Speculative SpeculativeConfig
 	Alignment   AlignmentConfig
+	// OptimisticModifiers are passed through to the OS immediately on press
+	// (so modifier+mouse works without delay) and retracted only if a matched
+	// mapping does not keep them in its output.
+	OptimisticModifiers map[KeyCode]bool
 }
 
 // SemanticConfig configures the semantic state machine

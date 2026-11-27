@@ -87,13 +87,17 @@ Optional global behavior settings:
 {
   "type": "settings",
   "chatterThreshold": "80ms",
-  "chatterKeys": ["cmd"]
+  "chatterKeys": ["cmd"],
+  "optimisticModifiers": ["shift", "ctrl"],
+  "pointerFlush": true
 }
 ```
 
 Fields:
 - `chatterThreshold` (optional): Filter **switch chatter** — a worn key emitting spurious release+press pairs while held, which otherwise re-triggers mappings (e.g. Cmd+V pasting twice). For guarded keys, a release is deferred by this duration; if the same key is pressed again within the window, the release+press pair is swallowed as chatter. Accepts Go duration strings (`"50ms"`, `"100ms"`). Omitted or `"0"` means disabled (the default). Side effect: real releases of guarded keys take effect up to this duration later.
 - `chatterKeys` (optional): Restrict the chatter filter to these keys. Omit to apply it to all keys. Restricting it to the chattering key is recommended, so fast legitimate double-taps of other keys are never affected.
+- `optimisticModifiers` (optional): Modifiers that are forwarded to the OS immediately on press, so holding them while clicking or scrolling the mouse works natively (e.g. Shift+Click to select text in kitty while a TUI app captures the mouse, or Ctrl+Click in a browser). If a subsequent key triggers a mapping that does **not** include the modifier in its `output`, KeySwift retracts (releases) the modifier right before sending the mapped keys. If the mapping **does** include it, the modifier stays held until you physically release it. Omit to use the default (left and right Shift and Ctrl). Set to `[]` to absorb all mapped modifiers instead. Only modifier key names are allowed.
+- `pointerFlush` (optional): Default `true`. Modifiers not listed in `optimisticModifiers` (such as `cmd`/Super and `alt`) are absorbed on press to avoid standalone tap side effects (GNOME Super opening Activities, GTK Alt focusing the menu bar). When `pointerFlush` is enabled, KeySwift opens ungrabbed pointer devices (mice, touchpads including tap-to-click via `BTN_TOUCH`, scroll wheels) **read-only without grabbing them** and flushes any absorbed modifiers as soon as a button is pressed or the wheel scrolls, so `Cmd+Click` and `Ctrl+Scroll` keep working. Because the pointer is not grabbed, there is a tiny scheduling race under heavy system load; set to `false` to disable pointer observation.
 
 ## Key Names
 

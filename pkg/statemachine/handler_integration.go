@@ -127,6 +127,20 @@ func (h *HandlerWithStateMachine) ProcessEvents(output OutputDevice, windowMonit
 
 	slog.Info("State machine enabled for event processing", "mappings", len(h.cfg.Mappings))
 
+	if h.cfg.Settings.PointerFlush {
+		watcher := newPointerWatcher(inputDirPath, h.grabbedPaths(), func() {
+			if err := h.stateMachine.FlushAbsorbedModifiers(); err != nil {
+				slog.Error("Failed to flush absorbed modifiers on pointer action", "error", err)
+			}
+		})
+		h.wg.Add(1)
+		go func() {
+			defer h.wg.Done()
+			watcher.run(h.ctx)
+		}()
+		slog.Info("Pointer modifier flush enabled")
+	}
+
 	h.devicesMu.RLock()
 	devices := append([]*handlerDevice(nil), h.devices...)
 	h.devicesMu.RUnlock()
@@ -214,6 +228,13 @@ func (h *HandlerWithStateMachine) processDeviceEvents(dev *handlerDevice) error 
 		case inputEventSyncRecovery:
 			h.recoverDroppedInputEvents(dev, input, "syn-dropped")
 		case inputEventForward:
+			if h.stateMachine != nil && isPointerActionEvent(uint16(ev.Type), ev.Code.Value(), ev.Value) {
+				if err := h.stateMachine.FlushAbsorbedModifiers(); err != nil {
+					slog.Error("Failed to flush absorbed modifiers on pointer action",
+						"device", dev.name,
+						"error", err)
+				}
+			}
 			h.forwardInputEvent(dev, ev)
 		default:
 			h.processKeyEvent(dev, ev)
@@ -401,6 +422,17 @@ func (h *HandlerWithStateMachine) tryReconnect(dev *handlerDevice) error {
 
 	dev.setConnection(candidate.Path, input)
 	return nil
+}
+
+func (h *HandlerWithStateMachine) grabbedPaths() map[string]struct{} {
+	h.devicesMu.RLock()
+	defer h.devicesMu.RUnlock()
+
+	paths := make(map[string]struct{}, len(h.devices))
+	for _, dev := range h.devices {
+		paths[dev.path] = struct{}{}
+	}
+	return paths
 }
 
 func (h *HandlerWithStateMachine) activePaths(exclude DeviceID) map[string]struct{} {

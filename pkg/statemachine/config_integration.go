@@ -27,6 +27,14 @@ func NewConfigStateMachine(
 ) *ConfigStateMachine {
 	engine := NewConfigMappingEngine(cfg)
 
+	if cfg.Settings.OptimisticModifiers != nil {
+		optimistic := make(map[KeyCode]bool, len(cfg.Settings.OptimisticModifiers))
+		for _, key := range cfg.Settings.OptimisticModifiers {
+			optimistic[key] = true
+		}
+		machineConfig.OptimisticModifiers = optimistic
+	}
+
 	machine := NewMachine(engine, output, machineConfig)
 
 	return &ConfigStateMachine{
@@ -90,4 +98,9 @@ func (c *ConfigStateMachine) EmergencyRelease() []KeyCode {
 // HandleDeviceLost releases any keys still associated with a device that went away.
 func (c *ConfigStateMachine) HandleDeviceLost(device DeviceID) error {
 	return c.machine.HandleDeviceLost(device)
+}
+
+// FlushAbsorbedModifiers forwards absorbed modifiers to the virtual keyboard.
+func (c *ConfigStateMachine) FlushAbsorbedModifiers() error {
+	return c.machine.FlushAbsorbedModifiers()
 }

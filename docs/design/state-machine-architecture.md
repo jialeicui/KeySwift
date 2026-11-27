@@ -549,7 +549,21 @@ func (ssm *SSM) Translate(input InputState) SemanticState {
 }
 ```
 
-#### 5.2.2 Speculative Execution and Compensation
+#> **Implementation note (modifier policy):** The current implementation replaces
+> the time-based `ModifierPendingThreshold` heuristic with a per-modifier policy
+> (`optimisticModifiers` and `pointerFlush` in settings):
+> - **Optimistic modifiers** (default: Shift, Ctrl) are passed through to the OS
+>   immediately on press so modifier+mouse works with zero delay. If a mapping
+>   later matches, flushed modifiers missing from the mapped output are
+>   retracted before the mapped keys are emitted; flushed modifiers included in
+>   the output stay under passthrough ownership until physically released.
+> - **Absorbed modifiers** (default: Super/Cmd, Alt) are still held back on press
+>   to avoid standalone tap side effects (GNOME Super → Activities, GTK Alt →
+>   menu bar). In addition to flushing on an unmatched keyboard key, they are
+>   flushed when the non-grabbing `pointerWatcher` observes a pointer button
+>   press, touchpad tap (`BTN_TOUCH`), or wheel scroll on an ungrabbed device.
+
+### 5.2.2 Speculative Execution and Compensation
 
 ```go
 func (se *SpeculativeExecutor) ExecuteSpeculative(cmd OutputCommand) error {

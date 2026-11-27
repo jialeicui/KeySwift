@@ -53,10 +53,21 @@
   // chatterKeys: restrict the filter to these keys; omit to filter all keys.
   // Restricting to a chattering modifier is recommended so fast double-tap
   // of letter keys is never affected.
+  // optimisticModifiers: modifiers forwarded immediately on press so
+  // modifier+mouse shortcuts work natively (e.g. Shift+Click selection in
+  // kitty, Ctrl+Click in browsers). If a matched mapping omits the modifier
+  // from its output, it is retracted before sending the mapped keys; if the
+  // output keeps it, it stays held until physically released.
+  // Omit to default to left/right Shift and Ctrl; set to [] to disable.
+  // pointerFlush: observe ungrabbed mice/touchpads read-only (no grab) and
+  // flush absorbed modifiers (cmd/alt) on button press, tap-to-click, or
+  // wheel scroll so Cmd+Click works. Omit for default true; false disables.
   // {
   //   "type": "settings",
   //   "chatterThreshold": "80ms",
-  //   "chatterKeys": ["cmd"]
+  //   "chatterKeys": ["cmd"],
+  //   "optimisticModifiers": ["shift", "ctrl"],
+  //   "pointerFlush": true
   // },
   
   // ========== Key Mappings ==========
