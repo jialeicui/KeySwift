@@ -34,6 +34,7 @@ KeySwift is a Linux keyboard remapping tool designed specifically for GNOME desk
 │   │   ├── config_engine.go      # Config-based mapping engine
 │   │   ├── config_integration.go # State machine + config integration
 │   │   ├── handler_integration.go# Input device management
+│   │   ├── pointer_watcher.go    # Non-grabbing pointer observer for modifier flush
 │   │   ├── adapter.go            # Output device adapter
 │   │   └── interfaces.go         # Core interfaces
 │   ├── evdev/                    # Input device management
@@ -140,6 +141,8 @@ The configuration file (`~/.config/keyswift/config.json`) is a JSON array of rul
 - **`settings`**: Optional global settings
   - `chatterThreshold`: switch-chatter filter — defer releases of guarded keys by this duration; a same-key press within the window swallows the release+press pair (e.g. `"80ms"`; omitted/`"0"` = disabled)
   - `chatterKeys`: restrict the filter to these keys; omit for all keys
+  - `optimisticModifiers`: modifiers passed through immediately on press and retracted only when a matched mapping omits them from its output (default: left/right Shift and Ctrl; `[]` disables)
+  - `pointerFlush`: observe ungrabbed pointer devices without grabbing them and flush absorbed modifiers (e.g. `cmd`/`alt`) on button press or wheel scroll (default: `true`)
 
 ### Example Configuration
 
@@ -207,9 +210,12 @@ See `examples/config.json` and `examples/config.json5` (annotated) for comprehen
 ## Key Implementation Details
 
 ### Modifier Key Handling
-- Modifier keys (Ctrl, Alt, Meta) are tracked separately
-- Pass-through mode for modifiers enables browser shortcuts (e.g., Ctrl+Click)
-- Modifier release events are synthesized when remapping begins
+- **Optimistic modifiers** (default: Shift, Ctrl): passed through to the virtual keyboard immediately on press so modifier+mouse shortcuts (e.g. Shift+Click selection in kitty, Ctrl+Click) work without delay
+  - When a mapping matches, flushed modifiers missing from the mapped output are retracted before the output keys are pressed
+  - Flushed modifiers kept in the mapped output stay under passthrough ownership and release only when physically released
+- **Absorbed modifiers** (default: Meta/Super/Cmd, Alt): held back on press to avoid standalone tap side effects (e.g. GNOME Super → Activities, GTK Alt → menu bar)
+  - Flushed when a non-modifier key is pressed without a mapping match, or when `pointer_watcher.go` observes a button press / wheel scroll on an ungrabbed pointer device
+  - Tapped (press+release) if released alone without any combo
 
 ### Key State Management
 - Debouncing with 5ms threshold

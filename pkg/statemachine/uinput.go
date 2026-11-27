@@ -108,21 +108,21 @@ func (d *uinputLowLevelDevice) setup(name string) error {
 	fd := d.file.Fd()
 
 	for _, typ := range []uint16{evKey, evRel, evMsc} {
-		if err := uinputIoctl(fd, uiSetEvBit, uintptr(typ)); err != nil {
+		if err := inputIoctl(fd, uiSetEvBit, uintptr(typ)); err != nil {
 			return fmt.Errorf("enable event type 0x%x: %w", typ, err)
 		}
 	}
 	for code := uint16(0); code <= keyMax; code++ {
-		if err := uinputIoctl(fd, uiSetKeyBit, uintptr(code)); err != nil {
+		if err := inputIoctl(fd, uiSetKeyBit, uintptr(code)); err != nil {
 			return fmt.Errorf("enable key code 0x%x: %w", code, err)
 		}
 	}
 	for _, axis := range virtualPointerAxes {
-		if err := uinputIoctl(fd, uiSetRelBit, uintptr(axis)); err != nil {
+		if err := inputIoctl(fd, uiSetRelBit, uintptr(axis)); err != nil {
 			return fmt.Errorf("enable relative axis 0x%x: %w", axis, err)
 		}
 	}
-	if err := uinputIoctl(fd, uiSetMscBit, mscScan); err != nil {
+	if err := inputIoctl(fd, uiSetMscBit, mscScan); err != nil {
 		return fmt.Errorf("enable msc scan code: %w", err)
 	}
 
@@ -137,7 +137,7 @@ func (d *uinputLowLevelDevice) setup(name string) error {
 	if _, err := d.file.Write(setup); err != nil {
 		return fmt.Errorf("write uinput device setup: %w", err)
 	}
-	if err := uinputIoctl(fd, uiDevCreate, 0); err != nil {
+	if err := inputIoctl(fd, uiDevCreate, 0); err != nil {
 		return fmt.Errorf("create uinput device: %w", err)
 	}
 	return nil
@@ -156,7 +156,7 @@ func (d *uinputLowLevelDevice) Sync() error {
 }
 
 func (d *uinputLowLevelDevice) Close() error {
-	if err := uinputIoctl(d.file.Fd(), uiDevDestroy, 0); err != nil {
+	if err := inputIoctl(d.file.Fd(), uiDevDestroy, 0); err != nil {
 		slog.Warn("Failed to destroy uinput device", "error", err)
 	}
 	return d.file.Close()
@@ -178,10 +178,10 @@ func (d *uinputLowLevelDevice) writeRawEvent(typ, code uint16, value int32) erro
 	return nil
 }
 
-func uinputIoctl(fd uintptr, request uint, arg uintptr) error {
+func inputIoctl(fd uintptr, request uint, arg uintptr) error {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(request), arg)
 	if errno != 0 {
-		return fmt.Errorf("uinput ioctl 0x%x: %w", request, errno)
+		return fmt.Errorf("input ioctl 0x%x: %w", request, errno)
 	}
 	return nil
 }

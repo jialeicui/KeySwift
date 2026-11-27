@@ -287,11 +287,12 @@ func (m *Machine) executePassthrough(cmd OutputCommand) error {
 //     release and leave a passthrough key pressed on the OS forever.
 //
 //   - Presses translate to a SemanticState and run the mapping engine. On a
-//     match, any previously-flushed Active modifiers are released first so
-//     they don't fight the mapped output, then handleMapping applies the
-//     output. On no match, the press is absorbed (Active modifier waiting for
-//     a combo), absorbed-modifier-flushed (preserves OS-level shortcuts), or
-//     forwarded as-is.
+//     match, previously-flushed Active modifiers absent from the mapped output
+//     are retracted first so they don't fight the output, while flushed
+//     modifiers kept in the output stay under passthrough ownership until
+//     physically released. On no match, optimistic modifiers are passed through
+//     immediately, other Active modifiers are absorbed until a non-modifier key
+//     or pointer action flushes them, and remaining presses are forwarded as-is.
 func (m *Machine) handleEvent(event KeyEvent) error {
 	slog.Debug("handleEvent called", "key", event.Key, "action", event.Action)
 
@@ -320,23 +321,50 @@ func (m *Machine) handleEvent(event KeyEvent) error {
 	commands, matched := m.engine.Match(semanticState)
 	slog.Debug("Engine Match result", "matched", matched, "commands", commands)
 	if matched {
+		pressedOutputs := make(map[KeyCode]bool, len(commands))
+		for _, cmd := range commands {
+			if cmd.Action == KeyPress {
+				pressedOutputs[cmd.Key] = true
+			}
+		}
+
 		m.mu.Lock()
 		var toRelease []KeyCode
+		retained := make(map[KeyCode]bool)
 		for modKey := range semanticState.Modifiers.Active {
 			if state, exists := m.modifierStates[modKey]; exists && state == ModifierStateFlushed {
-				// Previously flushed for an unmapped combo, but now used in a mapping.
-				// We must release it from the OS, otherwise it will remain stuck.
-				slog.Debug("Releasing previously flushed modifier before mapping", "key", modKey)
+				if pressedOutputs[modKey] {
+					// Already pressed on the OS and still part of the mapped output.
+					// Keep it under passthrough ownership so releasing the combo key
+					// doesn't lift a modifier the user is still physically holding.
+					retained[modKey] = true
+					continue
+				}
+				// Previously passed through, but the mapping replaces it. Retract it
+				// from the OS before applying the mapped output.
+				slog.Debug("Retracting previously flushed modifier before mapping", "key", modKey)
 				toRelease = append(toRelease, modKey)
 			}
 			m.modifierStates[modKey] = ModifierStateUsedInMapping
 		}
 		m.mu.Unlock()
 
+		sort.Slice(toRelease, func(i, j int) bool { return toRelease[i] < toRelease[j] })
 		for _, rel := range toRelease {
 			if err := m.executePassthrough(OutputCommand{Key: rel, Action: KeyRelease}); err != nil {
 				return err
 			}
+		}
+
+		if len(retained) > 0 {
+			filtered := make([]OutputCommand, 0, len(commands))
+			for _, cmd := range commands {
+				if cmd.Action == KeyPress && retained[cmd.Key] {
+					continue
+				}
+				filtered = append(filtered, cmd)
+			}
+			commands = filtered
 		}
 
 		return m.handleMapping(commands, inputState, semanticState)
@@ -345,6 +373,17 @@ func (m *Machine) handleEvent(event KeyEvent) error {
 	// Step 4: No mapping matched — decide whether to forward the press.
 
 	if _, isActive := semanticState.Modifiers.Active[event.Key]; isActive {
+		if m.config.OptimisticModifiers[event.Key] {
+			slog.Debug("Passing through optimistic modifier", "key", event.Key)
+			if err := m.executePassthrough(OutputCommand{Key: event.Key, Action: KeyPress}); err != nil {
+				return err
+			}
+			m.mu.Lock()
+			m.modifierStates[event.Key] = ModifierStateFlushed
+			m.mu.Unlock()
+			return nil
+		}
+
 		slog.Debug("Active modifier absorbed (waiting for combo)", "key", event.Key)
 		m.mu.Lock()
 		m.modifierStates[event.Key] = ModifierStateAbsorbed
@@ -355,23 +394,8 @@ func (m *Machine) handleEvent(event KeyEvent) error {
 	// Non-modifier key was pressed and didn't match any mappings.
 	// Flush absorbed modifiers to OS so native shortcuts work.
 	if !IsModifier(event.Key) {
-		m.mu.Lock()
-		var toFlush []KeyCode
-		for modKey, state := range m.modifierStates {
-			if state == ModifierStateAbsorbed {
-				toFlush = append(toFlush, modKey)
-			}
-		}
-		m.mu.Unlock()
-
-		for _, modKey := range toFlush {
-			slog.Debug("Flushing absorbed modifier for unmapped combo", "key", modKey)
-			if err := m.executePassthrough(OutputCommand{Key: modKey, Action: KeyPress}); err != nil {
-				return err
-			}
-			m.mu.Lock()
-			m.modifierStates[modKey] = ModifierStateFlushed
-			m.mu.Unlock()
+		if err := m.flushAbsorbedModifiers(); err != nil {
+			return err
 		}
 	}
 
@@ -379,6 +403,52 @@ func (m *Machine) handleEvent(event KeyEvent) error {
 	// SSM did not classify as Active.
 	slog.Debug("Forwarding press event", "key", event.Key)
 	return m.executePassthrough(OutputCommand{Key: event.Key, Action: event.Action})
+}
+
+// FlushAbsorbedModifiers forwards any absorbed modifiers to the OS so actions
+// that bypass the grabbed keyboard (e.g. clicks on an ungrabbed mouse) observe
+// the modifiers as held.
+func (m *Machine) FlushAbsorbedModifiers() error {
+	m.eventMu.Lock()
+	defer m.eventMu.Unlock()
+
+	m.mu.RLock()
+	running := m.running
+	m.mu.RUnlock()
+	if !running {
+		return nil
+	}
+
+	err := m.flushAbsorbedModifiers()
+	if errors.Is(err, ErrOutputResetRequired) {
+		m.HandleOutputFailure()
+		return nil
+	}
+	return err
+}
+
+// flushAbsorbedModifiers flushes absorbed modifiers assuming eventMu is held.
+func (m *Machine) flushAbsorbedModifiers() error {
+	m.mu.RLock()
+	var toFlush []KeyCode
+	for modKey, state := range m.modifierStates {
+		if state == ModifierStateAbsorbed {
+			toFlush = append(toFlush, modKey)
+		}
+	}
+	m.mu.RUnlock()
+
+	sort.Slice(toFlush, func(i, j int) bool { return toFlush[i] < toFlush[j] })
+	for _, modKey := range toFlush {
+		slog.Debug("Flushing absorbed modifier", "key", modKey)
+		if err := m.executePassthrough(OutputCommand{Key: modKey, Action: KeyPress}); err != nil {
+			return err
+		}
+		m.mu.Lock()
+		m.modifierStates[modKey] = ModifierStateFlushed
+		m.mu.Unlock()
+	}
+	return nil
 }
 
 // handleReleaseEvent handles a release event after binder cleanup.

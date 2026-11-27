@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jialeicui/golibevdev"
 	"github.com/jialeicui/keyswift/pkg/keys"
 )
 
@@ -30,6 +31,24 @@ type Settings struct {
 	ChatterThreshold time.Duration `json:"-"`
 	// ChatterKeys restricts the filter to these keys; empty means all keys.
 	ChatterKeys []keys.Key `json:"-"`
+	// OptimisticModifiers are passed through immediately on press and retracted
+	// only when a matched mapping omits them from its output. Defaults to Shift
+	// and Ctrl (left and right) when omitted; an empty list disables it.
+	OptimisticModifiers []keys.Key `json:"-"`
+	// PointerFlush flushes absorbed modifiers when an ungrabbed pointer device
+	// reports a button press or wheel scroll. Defaults to true when omitted.
+	PointerFlush bool `json:"-"`
+}
+
+// DefaultOptimisticModifiers returns the modifiers passed through optimistically
+// when the settings rule does not specify optimisticModifiers.
+func DefaultOptimisticModifiers() []keys.Key {
+	return []keys.Key{
+		golibevdev.KeyLeftShift,
+		golibevdev.KeyRightShift,
+		golibevdev.KeyLeftCtrl,
+		golibevdev.KeyRightCtrl,
+	}
 }
 
 // MappingRule represents a single key mapping
@@ -55,8 +74,10 @@ type RawRule struct {
 	When   *WhenCondition `json:"when,omitempty"`
 
 	// Settings rule fields (type: "settings")
-	ChatterThreshold string   `json:"chatterThreshold,omitempty"`
-	ChatterKeys      []string `json:"chatterKeys,omitempty"`
+	ChatterThreshold    string    `json:"chatterThreshold,omitempty"`
+	ChatterKeys         []string  `json:"chatterKeys,omitempty"`
+	OptimisticModifiers *[]string `json:"optimisticModifiers,omitempty"`
+	PointerFlush        *bool     `json:"pointerFlush,omitempty"`
 }
 
 // LoadConfig loads and parses the configuration file
@@ -74,6 +95,10 @@ func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{
 		Vars:     make(map[string][]string),
 		Mappings: make([]MappingRule, 0),
+		Settings: Settings{
+			OptimisticModifiers: DefaultOptimisticModifiers(),
+			PointerFlush:        true,
+		},
 	}
 
 	// First pass: collect all vars
@@ -131,6 +156,23 @@ func (cfg *Config) processSettingsRule(rule RawRule) error {
 			return fmt.Errorf("invalid chatterKeys: %w", err)
 		}
 		cfg.Settings.ChatterKeys = chatterKeys
+	}
+
+	if rule.OptimisticModifiers != nil {
+		modifiers, err := cfg.resolveKeys(*rule.OptimisticModifiers)
+		if err != nil {
+			return fmt.Errorf("invalid optimisticModifiers: %w", err)
+		}
+		for _, key := range modifiers {
+			if !keys.IsModifier(key) {
+				return fmt.Errorf("invalid optimisticModifiers: key '%s' is not a modifier", key)
+			}
+		}
+		cfg.Settings.OptimisticModifiers = modifiers
+	}
+
+	if rule.PointerFlush != nil {
+		cfg.Settings.PointerFlush = *rule.PointerFlush
 	}
 
 	return nil
